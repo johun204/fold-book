@@ -13,10 +13,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-
-
 import androidx.compose.material.icons.filled.Delete
-
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -24,8 +23,10 @@ import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -45,6 +46,7 @@ fun BrowseScreen(app: App, onOpen: (Connection) -> Unit) {
     val connections by app.connections.flow.collectAsStateWithLifecycle()
     var showAdd by remember { mutableStateOf(false) }
     var menuFor by remember { mutableStateOf<String?>(null) }
+    var renaming by remember { mutableStateOf<Connection?>(null) }
 
     Scaffold(
         topBar = { TopAppBar(title = { Text("탐색") }) },
@@ -72,6 +74,11 @@ fun BrowseScreen(app: App, onOpen: (Connection) -> Unit) {
                     )
                     DropdownMenu(expanded = menuFor == c.id, onDismissRequest = { menuFor = null }) {
                         DropdownMenuItem(
+                            text = { Text("별칭 변경") },
+                            leadingIcon = { Icon(Icons.Filled.Edit, null) },
+                            onClick = { renaming = c; menuFor = null },
+                        )
+                        DropdownMenuItem(
                             text = { Text("이 저장소 삭제") },
                             leadingIcon = { Icon(Icons.Filled.Delete, null) },
                             onClick = { app.connections.remove(c.id); menuFor = null },
@@ -81,7 +88,8 @@ fun BrowseScreen(app: App, onOpen: (Connection) -> Unit) {
             }
             item {
                 Text(
-                    "같은 종류를 여러 개 추가할 수 있어요 (공유폴더 여러 경로, 드라이브 여러 계정).",
+                    "저장소를 길게 누르면 별칭 변경·삭제. 같은 종류를 여러 개 추가할 수 있어요 " +
+                        "(공유폴더 여러 경로, 드라이브 여러 계정).",
                     style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier.padding(16.dp),
                 )
@@ -90,6 +98,22 @@ fun BrowseScreen(app: App, onOpen: (Connection) -> Unit) {
     }
 
     if (showAdd) AddConnectionSheet(app = app, onDismiss = { showAdd = false })
+
+    renaming?.let { c ->
+        var text by remember(c.id) { mutableStateOf(c.label) }
+        AlertDialog(
+            onDismissRequest = { renaming = null },
+            confirmButton = {
+                TextButton(onClick = {
+                    app.connections.rename(c.id, text)
+                    renaming = null
+                }) { Text("변경") }
+            },
+            dismissButton = { TextButton(onClick = { renaming = null }) { Text("취소") } },
+            title = { Text("별칭 변경") },
+            text = { OutlinedTextField(value = text, onValueChange = { text = it }, singleLine = true) },
+        )
+    }
 }
 
 private fun iconFor(t: ConnType) = when (t) {

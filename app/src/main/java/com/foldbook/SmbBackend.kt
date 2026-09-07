@@ -67,4 +67,26 @@ class SmbBackend(private val c: Connection) : StorageBackend {
         val p = parent(folderId) ?: return emptyList()
         return list(p).filter { it.isDir }
     }
+
+    override suspend fun imageSize(entryId: String): Pair<Int, Int>? = withContext(Dispatchers.IO) {
+        runCatching {
+            withShare { share ->
+                share.openFile(
+                    smb(entryId), EnumSet.of(AccessMask.GENERIC_READ), null,
+                    SMB2ShareAccess.ALL, SMB2CreateDisposition.FILE_OPEN, null,
+                ).use { f ->
+                    val buf = ByteArray(65536)
+                    var n = 0
+                    f.inputStream.use { ins ->
+                        while (n < buf.size) {
+                            val r = ins.read(buf, n, buf.size - n)
+                            if (r < 0) break
+                            n += r
+                        }
+                    }
+                    sizeFromPrefix(if (n == buf.size) buf else buf.copyOf(n))
+                }
+            }
+        }.getOrNull()
+    }
 }

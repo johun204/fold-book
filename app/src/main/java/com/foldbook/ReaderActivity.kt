@@ -2,21 +2,36 @@ package com.foldbook
 
 import android.content.Intent
 import android.content.res.Configuration
-import android.graphics.BitmapFactory
+import android.graphics.Color
 import android.os.Bundle
+import android.view.Gravity
 import android.view.WindowManager
+import android.widget.FrameLayout
+import android.widget.ProgressBar
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import java.io.File
+import java.util.concurrent.ConcurrentHashMap
+
+/** (connId|entryId) -> 이미지 크기. 프로세스 생존 동안 유지해 같은 폴더 재열람 시 재분석 생략. */
+object DimsCache {
+    private val m = ConcurrentHashMap<String, Pair<Int, Int>>()
+    fun get(k: String): Pair<Int, Int>? = m[k]
+    fun put(k: String, v: Pair<Int, Int>?) { if (v != null) m[k] = v }
+}
 
 class ReaderActivity : ComponentActivity() {
 
@@ -30,13 +45,21 @@ class ReaderActivity : ComponentActivity() {
     private var folderId: String = ""
     private var rolling = false
     private var saveJob: Job? = null
-    private val dimsCache = HashMap<String, Pair<Int, Int>?>()
+    private var restoredPage = 0
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         app = App.of(this)
         immersive()
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        setContentView(FrameLayout(this).apply {
+            setBackgroundColor(Color.BLACK)
+            addView(ProgressBar(this@ReaderActivity), FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.CENTER))
+        })
+
+        // 폴드/회전 등으로 재생성되면 저장해둔 현재 페이지에서 이어감
+        restoredPage = savedInstanceState?.getInt(SAVED_PAGE, 0) ?: 0
 
         val (connId, fId, fName, startEntry, sessionId) = parseIntent() ?: run {
             toast(getString(R.string.err_path)); finish(); return
@@ -47,6 +70,11 @@ class ReaderActivity : ComponentActivity() {
         folderId = fId
 
         lifecycleScope.launch { setup(fId, fName, startEntry, sessionId) }
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        if (::view.isInitialized) outState.putInt(SAVED_PAGE, view.currentPageNumber())
     }
 
     private data class Args(
@@ -88,9 +116,15 @@ class ReaderActivity : ComponentActivity() {
 
         val prefs = Prefs(this)
         val wide = isWideScreen()
-        val dimsMap = HashMap<String, Pair<Int, Int>?>()
-        if (conn.type == ConnType.LOCAL) for (e in images) dimsMap[e.id] = localDims(e.id)
-        val pages = SpreadPolicy.expand(images, prefs.splitSpreads(wide), prefs.direction) { id -> dimsMap[id] }
+        val autoPage = prefs.doublePage(wide)
+        // eschao 는 가로일 때만 실제로 양면 렌더 -> 여백 삽입/좌우순서도 그 조건에 맞춘다
+        val doubleMode = autoPage &&
+            resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+
+        val analyze = prefs.splitWideScans &&
+            (conn.type == ConnType.LOCAL || prefs.analyzeRemote)
+        val dimsMap = if (analyze) scanSizes(images) else emptyMap()
+        val pages = SpreadPolicy.expand(images, prefs.direction, doubleMode, prefs.splitWideScans) { id -> dimsMap[id] }
 
         val startEntryIdx =
             if (startEntryId != null) images.indexOfFirst { it.id == startEntryId }.coerceAtLeast(0) else 0
@@ -99,20 +133,30 @@ class ReaderActivity : ComponentActivity() {
 
         var s = sessionId?.let { app.sessions.get(it) }
             ?: app.sessions.findOrCreate(conn, fId, fName)
-        val startPage = when {
+        var startPage = when {
+            restoredPage in 1..pages.size -> restoredPage
             startEntryId != null -> startPageIdx + 1
             s.pageIndex in pages.indices -> s.pageIndex + 1
             else -> 1
         }
-        s = s.copy(pageCount = pages.size, folderName = fName.ifBlank { s.folderName })
+        // 양면 모드에서는 페어의 왼쪽(홀수, 1-based)로 스냅해야 좌/우 짝이 안 어긋남
+        if (doubleMode && startPage % 2 == 0) startPage = (startPage - 1).coerceAtLeast(1)
+        // 최초 setup 이후 재생성 시엔 세션 위치로 이어가도록 시작 이미지 지정 제거
+        intent.removeExtra(EXTRA_START_ENTRY_ID)
+
+        s = s.copy(
+            pageCount = pages.size,
+            pageIndex = (startPage - 1).coerceIn(0, (pages.size - 1).coerceAtLeast(0)),
+            folderName = fName.ifBlank { s.folderName },
+        )
         app.sessions.upsert(s)
         session = s
 
         val cacheDir = SessionCache.dir(this, s.id)
-        stream = PageStream(backend, pages, cacheDir, lifecycleScope)
+        stream = PageStream(backend, pages, cacheDir, lifecycleScope, prefs.prefetchForward)
         val provider = PageImageProvider(stream)
 
-        view = PageFlipView(this, provider, startPage, prefs.doublePage(wide))
+        view = PageFlipView(this, provider, startPage, autoPage)
         view.onBoundary = { fwd -> onBoundary(fwd) }
         view.onPageSettled = { n -> saveProgress(n) }
         stream.focus(startPage - 1)
@@ -121,18 +165,26 @@ class ReaderActivity : ComponentActivity() {
         if (prefs.foldFlip) FoldGestureDetector(this) { view.flipForward() }.start()
     }
 
-    private suspend fun localDims(id: String): Pair<Int, Int>? {
-        dimsCache[id]?.let { return it }
-        if (dimsCache.containsKey(id)) return null
-        val d = withContext(Dispatchers.IO) {
-            runCatching {
-                val o = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                BitmapFactory.decodeFile(id, o)
-                if (o.outWidth > 0) o.outWidth to o.outHeight else null
-            }.getOrNull()
+    /** 이미지 크기 병렬 분석 (원격은 헤더만). 캐시 히트는 건너뛴다. */
+    private suspend fun scanSizes(images: List<Entry>): Map<String, Pair<Int, Int>?> {
+        val result = HashMap<String, Pair<Int, Int>?>(images.size)
+        val todo = ArrayList<Entry>()
+        for (e in images) {
+            val cached = DimsCache.get("${conn.id}|${e.id}")
+            if (cached != null) result[e.id] = cached else todo.add(e)
         }
-        dimsCache[id] = d
-        return d
+        if (todo.isEmpty()) return result
+        val sem = Semaphore(if (conn.type == ConnType.LOCAL) 4 else 10)
+        coroutineScope {
+            todo.map { e ->
+                async(Dispatchers.IO) {
+                    val d = runCatching { sem.withPermit { backend.imageSize(e.id) } }.getOrNull()
+                    DimsCache.put("${conn.id}|${e.id}", d)
+                    e.id to d
+                }
+            }.awaitAll().forEach { (id, d) -> result[id] = d }
+        }
+        return result
     }
 
     private fun saveProgress(pageNumber: Int) {
@@ -220,6 +272,7 @@ class ReaderActivity : ComponentActivity() {
         const val EXTRA_FOLDER_NAME = "folderName"
         const val EXTRA_START_ENTRY_ID = "startEntry"
         const val EXTRA_SESSION_ID = "session"
+        private const val SAVED_PAGE = "savedPage"
 
         fun start(
             ctx: android.content.Context, connId: String, folderId: String, folderName: String,

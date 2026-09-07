@@ -105,11 +105,11 @@ class PageFlipView(
 
     private fun fingerMove(x: Float, y: Float) {
         if (pageFlip.isAnimating) return
-        if (pageFlip.canAnimate(x, y)) {
-            fingerUp(x, y)
-            return
-        }
-        if (pageFlip.onFingerMove(x, y)) {
+        // 손가락을 뗄 때(fingerUp)까지는 자동으로 넘기지 않는다. 가로 중심선을 넘겨도 드래그만 따라감.
+        // 화면 밖으로 나가도 페이지 말림 계산이 튀지 않도록 좌표를 뷰 안으로 클램프.
+        val cx = x.coerceIn(0f, width.toFloat())
+        val cy = y.coerceIn(0f, height.toFloat())
+        if (pageFlip.onFingerMove(cx, cy)) {
             lock.lock()
             try {
                 if (render.onFingerMove()) requestRender()
@@ -121,7 +121,8 @@ class PageFlipView(
 
     private fun fingerUp(x: Float, y: Float) {
         if (pageFlip.isAnimating) return
-        pageFlip.onFingerUp(x, y, duration)
+        // 뗀 위치를 기준으로 eschao 가 완료할지 되돌릴지 결정한다.
+        pageFlip.onFingerUp(x.coerceIn(0f, width.toFloat()), y.coerceIn(0f, height.toFloat()), duration)
         lock.lock()
         try {
             if (render.onFingerUp()) requestRender()

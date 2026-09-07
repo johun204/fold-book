@@ -1,6 +1,7 @@
 package com.foldbook
 
 import android.content.Context
+import android.graphics.BitmapFactory
 import android.os.Environment
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -26,7 +27,13 @@ interface StorageBackend {
 
     /** folderId 부모 아래 하위 폴더들 (자연정렬) — '다음 폴더' 계산용. */
     suspend fun siblingFolders(folderId: String): List<Entry>
+
+    /** 이미지 (width,height). 원격은 헤더 일부만 받아 파싱. 실패 시 null. */
+    suspend fun imageSize(entryId: String): Pair<Int, Int>?
 }
+
+/** 원격 백엔드 공용: 앞부분 바이트로 이미지 크기 파싱. */
+internal fun sizeFromPrefix(bytes: ByteArray): Pair<Int, Int>? = ImageHeader.size(bytes)
 
 internal val dirsThenNatural: Comparator<Entry> =
     Comparator { a, b ->
@@ -67,5 +74,13 @@ class LocalBackend : StorageBackend {
         (p.listFiles { f -> f.isDirectory }?.toList().orEmpty())
             .map { Entry(it.absolutePath, it.name, true) }
             .sortedWith { a, b -> NaturalOrder.compare(a.name, b.name) }
+    }
+
+    override suspend fun imageSize(entryId: String): Pair<Int, Int>? = withContext(Dispatchers.IO) {
+        runCatching {
+            val o = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeFile(entryId, o)
+            if (o.outWidth > 0) o.outWidth to o.outHeight else null
+        }.getOrNull()
     }
 }

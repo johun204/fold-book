@@ -86,4 +86,16 @@ class DriveBackend(private val c: Connection, private val appContext: Context) :
         val p = parent(folderId) ?: return emptyList()
         return list(p).filter { it.isDir }
     }
+
+    override suspend fun imageSize(entryId: String): Pair<Int, Int>? = withContext(Dispatchers.IO) {
+        runCatching {
+            val conn = URL("$API/$entryId?alt=media").openConnection() as HttpURLConnection
+            conn.setRequestProperty("Authorization", "Bearer ${token()}")
+            conn.setRequestProperty("Range", "bytes=0-65535")
+            conn.connectTimeout = 15000
+            conn.readTimeout = 20000
+            if (conn.responseCode !in 200..299) return@runCatching null
+            sizeFromPrefix(conn.inputStream.use { it.readBytes() })
+        }.getOrNull()
+    }
 }

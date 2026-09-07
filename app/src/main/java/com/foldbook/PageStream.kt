@@ -23,12 +23,14 @@ class PageStream(
     val pages: List<PageRef>,
     private val cacheDir: File,
     private val scope: CoroutineScope,
+    prefetchForward: Int = 5,
 ) {
     private companion object {
         const val BACK = 2
-        const val FWD = 5
-        const val KEEP = 12
     }
+
+    private val fwd = prefetchForward.coerceIn(1, 12)
+    private val keep = fwd + BACK + 6   // 창 밖 캐시 유지 폭
 
     @Volatile private var pageW = 1
     @Volatile private var pageH = 1
@@ -57,7 +59,15 @@ class PageStream(
 
     fun placeholder(): Bitmap = gray
 
-    fun bitmap(index: Int): Bitmap? = synchronized(decoded) { decoded[index]?.takeIf { !it.isRecycled } }
+    fun bitmap(index: Int): Bitmap? {
+        if (index in pages.indices && pages[index].entryId.isEmpty()) {
+            synchronized(decoded) { decoded[index]?.takeIf { !it.isRecycled } }?.let { return it }
+            val f = makeFiller(pageW, pageH)
+            synchronized(decoded) { decoded[index] = f }
+            return f
+        }
+        return synchronized(decoded) { decoded[index]?.takeIf { !it.isRecycled } }
+    }
 
     fun focus(index: Int) {
         current = index
@@ -67,8 +77,9 @@ class PageStream(
     private fun ensureWindow() {
         val toLoad = ArrayList<Int>()
         synchronized(decoded) {
-            for (i in (current - BACK)..(current + FWD)) {
+            for (i in (current - BACK)..(current + fwd)) {
                 if (i !in pages.indices) continue
+                if (pages[i].entryId.isEmpty()) continue   // 빈 페이지는 로딩 대상 아님
                 if (decoded.containsKey(i) || i in inflight) continue
                 inflight.add(i)
                 toLoad.add(i)
@@ -76,7 +87,7 @@ class PageStream(
             val it = decoded.entries.iterator()
             while (it.hasNext()) {
                 val e = it.next()
-                if (e.key < current - KEEP || e.key > current + KEEP) {
+                if (e.key < current - keep || e.key > current + keep) {
                     e.value.recycle()
                     it.remove()
                 }
@@ -152,6 +163,10 @@ class PageStream(
     private fun makeGray(w: Int, h: Int) =
         Bitmap.createBitmap(maxOf(w, 1), maxOf(h, 1), Bitmap.Config.ARGB_8888)
             .apply { eraseColor(Color.rgb(58, 58, 58)) }
+
+    private fun makeFiller(w: Int, h: Int) =
+        Bitmap.createBitmap(maxOf(w, 1), maxOf(h, 1), Bitmap.Config.ARGB_8888)
+            .apply { eraseColor(Color.rgb(18, 18, 18)) }
 
     private fun sanitize(n: String) = n.replace(Regex("[^A-Za-z0-9._-]"), "_").take(48)
 

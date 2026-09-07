@@ -9,6 +9,7 @@ class App : Application() {
         private set
     lateinit var sessions: SessionStore
         private set
+    val prefs: Prefs by lazy { Prefs(this) }
 
     override fun onCreate() {
         super.onCreate()

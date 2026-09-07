@@ -45,6 +45,13 @@ class ConnectionStore(context: Context) {
         _flow.value = _flow.value.filterNot { it.id == id }
         saveList(file, _flow.value)
     }
+
+    /** 별칭(표시 이름) 변경. */
+    fun rename(id: String, label: String) {
+        if (id == "local" || label.isBlank()) return
+        _flow.value = _flow.value.map { if (it.id == id) it.copy(label = label.trim()) else it }
+        saveList(file, _flow.value)
+    }
 }
 
 class SessionStore(context: Context) {
