@@ -1,4 +1,4 @@
-package com.comicviewer
+package com.foldbook
 
 import android.content.Context
 import kotlinx.coroutines.Dispatchers

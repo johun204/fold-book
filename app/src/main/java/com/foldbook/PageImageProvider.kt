@@ -1,4 +1,4 @@
-package com.comicviewer
+package com.foldbook
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory

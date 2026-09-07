@@ -1,4 +1,4 @@
-package com.comicviewer
+package com.foldbook
 
 import com.hierynomus.msdtyp.AccessMask
 import com.hierynomus.msfscc.FileAttributes

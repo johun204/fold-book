@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">만화책 뷰어</string>
+    <string name="app_name">폴드책</string>
     <string name="settings">설정</string>
 
     <string name="open_local">로컬 저장소에서 열기</string>

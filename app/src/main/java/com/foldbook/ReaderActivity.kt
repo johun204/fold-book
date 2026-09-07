@@ -1,4 +1,4 @@
-package com.comicviewer
+package com.foldbook
 
 import android.content.Intent
 import android.content.res.Configuration

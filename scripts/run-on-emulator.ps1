@@ -1,4 +1,4 @@
-# 만화책 뷰어 - 에뮬레이터에서 빌드·설치·스모크 테스트
+# 폴드책 - 에뮬레이터에서 빌드·설치·스모크 테스트
 # 요구: 여유 RAM 약 2GB, 여유 디스크 약 10GB (AVD userdata 파티션이 6GB 고정)
 # 사용: powershell -ExecutionPolicy Bypass -File scripts\run-on-emulator.ps1
 
@@ -45,11 +45,11 @@ do { Start-Sleep 3; $b = (& $adb shell getprop sys.boot_completed) -replace '\s'
 & $adb install -r -g "$proj\app\build\outputs\apk\debug\app-debug.apk"
 
 # 5) 테스트 데이터 푸시 + 모든 파일 접근 권한
-& $adb shell appops set com.comicviewer MANAGE_EXTERNAL_STORAGE allow
+& $adb shell appops set com.foldbook MANAGE_EXTERNAL_STORAGE allow
 if (Test-Path "$proj\testdata\Comics") { & $adb push "$proj\testdata\Comics" /sdcard/ }
 
 # 6) 첫 페이지 열기 (ACTION_VIEW 로 ReaderActivity 직행)
-& $adb shell am start -a android.intent.action.VIEW -t image/jpeg -d 'file:///sdcard/Comics/%EC%9B%90%ED%94%BC%EC%8A%A4/%EC%A0%9C1%EA%B6%8C/1.jpg' -n com.comicviewer/.ReaderActivity
+& $adb shell am start -a android.intent.action.VIEW -t image/jpeg -d 'file:///sdcard/Comics/%EC%9B%90%ED%94%BC%EC%8A%A4/%EC%A0%9C1%EA%B6%8C/1.jpg' -n com.foldbook/.ReaderActivity
 Start-Sleep 4
 & $adb exec-out screencap -p > "$proj\scripts\shot-reader.png"
 Write-Host "스크린샷: scripts\shot-reader.png"
@@ -58,4 +58,4 @@ Write-Host "스크린샷: scripts\shot-reader.png"
 & $adb shell input swipe 900 1200 120 1200 350
 Start-Sleep 2
 & $adb exec-out screencap -p > "$proj\scripts\shot-flip.png"
-Write-Host "완료. 홈: adb shell am start -n com.comicviewer/.MainActivity"
+Write-Host "완료. 홈: adb shell am start -n com.foldbook/.MainActivity"

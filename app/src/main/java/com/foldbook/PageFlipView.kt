@@ -1,4 +1,4 @@
-package com.comicviewer
+package com.foldbook
 
 import android.annotation.SuppressLint
 import android.content.Context

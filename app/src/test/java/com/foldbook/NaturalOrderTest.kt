@@ -1,4 +1,4 @@
-package com.comicviewer
+package com.foldbook
 
 import org.junit.Assert.assertEquals
 import org.junit.Test

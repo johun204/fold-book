@@ -12,11 +12,11 @@ val keystoreProps = Properties().apply {
 }
 
 android {
-    namespace = "com.comicviewer"
+    namespace = "com.foldbook"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.comicviewer"
+        applicationId = "com.foldbook"
         minSdk = 26
         targetSdk = 35
         versionCode = 1

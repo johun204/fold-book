@@ -1,4 +1,4 @@
-package com.comicviewer
+package com.foldbook
 
 import android.content.Intent
 import android.os.Bundle
@@ -22,7 +22,7 @@ import kotlinx.coroutines.withContext
 /**
  * 구글 드라이브 폴더 탐색 → 폴더 선택 시 캐시로 받아 뷰어를 연다.
  * 사전 준비: Google Cloud Console 에서 Drive API 활성화 + OAuth 동의화면(테스트 사용자에 본인 계정) +
- *           OAuth 클라이언트 ID(Android, 패키지 com.comicviewer + 서명 SHA-1) 등록. (README 참고)
+ *           OAuth 클라이언트 ID(Android, 패키지 com.foldbook + 서명 SHA-1) 등록. (README 참고)
  */
 class DriveBrowseActivity : AppCompatActivity() {
 

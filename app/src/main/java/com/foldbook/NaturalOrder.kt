@@ -1,4 +1,4 @@
-package com.comicviewer
+package com.foldbook
 
 /**
  * 파일명을 사람이 기대하는 순서로 비교한다.

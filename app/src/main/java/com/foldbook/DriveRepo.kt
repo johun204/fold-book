@@ -1,4 +1,4 @@
-package com.comicviewer
+package com.foldbook
 
 import android.content.Context
 import com.google.android.gms.auth.GoogleAuthUtil

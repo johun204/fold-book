@@ -1,6 +1,8 @@
-# 만화책 뷰어
+# 폴드책 (fold-book)
 
-이미지 폴더를 종이책처럼 넘겨 보는 안드로이드 만화 뷰어.
+갤럭시 폴더블에서 쓰는 책 뷰어. 이미지 폴더를 종이책처럼 넘겨 본다.
+로컬 저장소 · 윈도우 공유폴더(SMB) · 구글 드라이브의 폴더를 지원.
+패키지: `com.foldbook`
 
 ## 빌드
 - Android Studio 로 `comic-viewer/` 열기 → Gradle sync → 실행.
@@ -47,15 +49,10 @@
 
 ### 구글 드라이브 (Drive v3 REST + Google 로그인)
 - 홈 화면 "구글 드라이브" → 로그인 → 폴더 탐색 → "이 폴더 열기" → 캐시로 받아 재생
-- **사전 준비 (1회, 직접 해야 함):**
-  1. [Google Cloud Console](https://console.cloud.google.com) 프로젝트 생성
-  2. **Google Drive API** 사용 설정
-  3. **OAuth 동의 화면**: 외부/테스트, 테스트 사용자에 본인 Google 계정 추가, 범위 `.../auth/drive.readonly`
-  4. **사용자 인증 정보 → OAuth 클라이언트 ID → Android**:
-     - 패키지 이름 `com.comicviewer`
-     - SHA-1 지문: `keytool -list -v -keystore <디버그 키스토어> -alias androiddebugkey -storepass android`
-       (디버그 키스토어: `%USERPROFILE%\.android\debug.keystore`)
-  - Android OAuth 클라이언트는 패키지+SHA-1 로 매칭되므로 앱에 넣을 client_id/secret 은 없다.
+- **사전 준비(1회)는 [`docs/google-drive-setup.md`](docs/google-drive-setup.md) 참고.**
+  요약: GCP 프로젝트 → Drive API 사용 설정 → OAuth 동의화면(외부/테스트, 본인 계정을 테스트 사용자로,
+  scope `.../auth/drive.readonly`) → OAuth 클라이언트 ID(Android, 패키지 `com.foldbook` + 서명 SHA-1).
+- 릴리즈 서명 SHA-1: `3A:21:F0:1D:0F:80:01:04:1C:31:82:2E:87:25:55:65:43:C2:17:73`
 
 ## 실행 / 검증 상태
 - `gradlew :app:assembleDebug` + `:app:testDebugUnitTest` **통과** (자연 정렬·SpreadPolicy·폴더 탐색 단위 테스트 포함).
@@ -86,5 +83,5 @@
 | `FoldGestureDetector.kt` | 폴더블 접힘 제스처 |
 | `SmbRepo.kt` / `DriveRepo.kt` / `RemoteSync.kt` | 원격 폴더 → 로컬 캐시 동기화 |
 | `SmbConnectActivity.kt` / `DriveBrowseActivity.kt` | 원격 접속·탐색 UI |
-| `OpenReader.kt` | 진행 표시 + 뷰어 실행 공용 |
+| `ReaderActivity.kt` | 뷰어 화면 + 원격 sync + 다음 폴더 이동 |
 | `pageflip/` | 벤더링한 eschao PageFlip (Apache-2.0) |
