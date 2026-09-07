@@ -1,0 +1,49 @@
+<resources>
+    <string name="app_name">만화책 뷰어</string>
+    <string name="settings">설정</string>
+
+    <string name="open_local">로컬 저장소에서 열기</string>
+    <string name="open_smb">윈도우 공유폴더(SMB)</string>
+    <string name="open_drive">구글 드라이브</string>
+
+    <string name="grant_storage">저장소 접근 권한 허용</string>
+    <string name="status_need_perm">모든 파일 접근 권한이 필요합니다. (같은 폴더의 다음 이미지를 순서대로 읽기 위함)</string>
+    <string name="status_ready">이미지를 선택하면 같은 폴더의 만화를 순서대로 봅니다.</string>
+
+    <string name="err_path">이 파일의 실제 경로를 찾지 못했습니다. 내부/외부 저장소의 이미지를 선택하세요.</string>
+    <string name="err_empty">이 폴더에 이미지가 없습니다.</string>
+
+    <string name="first_page">첫 페이지입니다.</string>
+    <string name="ask_next_folder">이 폴더의 마지막 페이지입니다.\n다음 폴더 “%1$s” 로 넘어갈까요?</string>
+    <string name="last_folder">마지막 폴더입니다.</string>
+    <string name="move">이동</string>
+    <string name="close">닫기</string>
+
+    <string name="downloading">받는 중</string>
+    <string name="listing">목록 확인 중…</string>
+    <string name="remote_failed">실패: %1$s</string>
+
+    <!-- SMB -->
+    <string name="connect">연결</string>
+    <string name="smb_host_hint">호스트/IP (예: 192.168.0.10)</string>
+    <string name="smb_share_hint">공유 이름 (예: Comics)</string>
+    <string name="smb_path_hint">공유 안 폴더 경로 (예: 원피스/01권, 없으면 비움)</string>
+    <string name="smb_user_hint">사용자 이름 (게스트면 비움)</string>
+    <string name="smb_pass_hint">비밀번호</string>
+    <string name="smb_domain_hint">도메인 (선택)</string>
+    <string name="smb_need_host_share">호스트와 공유 이름은 필수입니다.</string>
+
+    <!-- Drive -->
+    <string name="drive_root">내 드라이브</string>
+    <string name="drive_sign_in">구글 로그인</string>
+    <string name="drive_up">상위 폴더</string>
+    <string name="drive_open_here">이 폴더 열기</string>
+    <string name="drive_sign_in_failed">로그인 실패 (코드 %1$d)</string>
+    <string name="drive_load_failed">불러오기 실패: %1$s</string>
+
+    <!-- 설정 -->
+    <string name="pref_dir_title">읽기 방향</string>
+    <string name="pref_spread_title">페이지 표시 방식</string>
+    <string name="pref_fold_title">폴더블 접힘으로 페이지 넘기기</string>
+    <string name="pref_fold_summary">갤럭시 폴드에서 살짝 접었다 펴면 다음 페이지</string>
+</resources>
