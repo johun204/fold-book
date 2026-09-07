@@ -36,31 +36,27 @@ AGP 8.7.3 / Kotlin 2.1.0 / Gradle 8.14.3 / compileSdk 35 / minSdk 26.
   원격 분할 분석 토글 / 미리 불러올 장 수(1~12) / 원격 썸네일 토글 / 폴더블 접힘 토글 /
   **현재 버전 + 업데이트 확인**(GitHub 최신 릴리즈와 비교, 새 버전이면 주황색으로 표시·클릭 시 릴리즈 페이지).
 
-## 리더 (v0.5.0 재작성)
+## 리더
 
-`GLSurfaceView` 와 eschao 라이브러리를 버리고, **일반 하드웨어 가속 `View` + `Canvas.drawBitmapMesh`** 로
-실사 종이 컬을 직접 구현했다 (`reader/CurlView` + `reader/CurlEngine`). 일반 View 라서 홈 갔다 오기·
-폴드/펼침·회전에 재생성이나 GL 컨텍스트 손실이 없다.
-
-- **드래그를 따라오는 3D 종이 컬.** 진행도 `t` 는 항상 0~1 로 클램프 → "절반에서 멈춤" 상태가 없고
-  **화면 한쪽 끝에서 반대쪽 끝까지** 컬이 이어진다. 손을 뗀 위치가 절반을 지났으면 커밋, 아니면 되돌림.
-- **읽기 방향은 좌우 반전 없이 기하로만 처리** — 이미지는 절대 뒤집지 않는다.
-  RTL(일본 만화)은 왼쪽→오른쪽 드래그가 다음 페이지, 컬은 왼쪽 모서리에서 손가락을 따라 말린다.
-  스프레드 스캔본은 오른쪽 절반부터 읽는다.
-- **양면 보기(태블릿·폴드 펼침)는 실제 책처럼 한 면(leaf)씩** 말려 넘어간다.
-- **첫 페이지에서 뒤로** 넘기면 "첫 페이지입니다 · 이전 권으로 이동할까요?" 를 묻고, 첫 권이면 못 간다고 알린다.
-  **마지막 페이지에서 앞으로**는 같은 부모 폴더 안 다음 권으로 이어지고(예: `원피스/1권`→`원피스/2권`),
-  없으면 "마지막 권" 알림만.
+- **드래그를 따라오는 3D 종이 컬** — `eschao/android-PageFlip` 을 `pageflip/` 로 벤더링해서 쓴다
+  (`PageFlipView` / `PageRender`). 손 뗀 위치가 화면 절반을 지났으면 넘어가고, 아니면 되돌림.
+- **읽기 방향(RTL, 일본 만화)은 넘김 효과를 좌우로 뒤집지 않는다.** `PageImageProvider` 가 라이브러리
+  페이지 순번을 읽기 순번의 **역순으로 매핑**할 뿐이다 → eschao 는 LTR 그대로 그리고, "왼쪽→오른쪽 드래그"
+  (backward flip)가 읽기상 **다음** 파일을, "오른쪽→왼쪽 드래그"가 **이전** 파일을 불러온다.
+  이미지도 스프레드 스캔본도 절대 반전하지 않는다.
+- **첫 페이지에서 뒤로** 넘기면 "이전 권으로 이동할까요?" (첫 권이면 안내만). **마지막에서 앞으로**는
+  같은 부모 폴더의 다음 권으로(예: `원피스/1권`→`원피스/2권`), 없으면 "마지막 권" 알림만.
 - **화면 탭 → 오버레이**: 상단 뒤로가기·제목·뷰어설정, 하단 `현재/전체` + **가로 스크러버**(RTL 은 오른쪽=1p).
   뷰어설정에서 두 쪽 보기 / **이 책의 읽기 방향**을 즉시 변경.
-- **창(window) 방식 로딩**: 현재 페이지를 최우선으로 디코드한 뒤에야 앞뒤 몇 장을 가까운 순으로 미리 받는다.
-  미준비 페이지는 회색, 도착 시 교체. 장 수는 설정에서 1~12.
-- **이어보기 즉시 열기**: 세션 캐시 디렉터리에 이미지 목록·스캔본 크기를 `manifest.json` 으로 저장해,
-  앱을 껐다 켠 뒤에도 **네트워크 조회 없이** 바로 리더로 진입하고 백그라운드에서 목록을 대조한다.
+- **창(window) 방식 로딩**(`reader/PageSource`): 현재 페이지를 최우선으로 디코드한 뒤에야 앞뒤 몇 장을
+  가까운 순으로 미리 받는다. 미준비 페이지는 회색, 도착 시 교체. 장 수는 설정에서 1~12.
+- **이어보기 즉시 열기**(`reader/SessionManifest`): 세션 캐시에 이미지 목록·스캔본 크기를 `manifest.json` 으로
+  저장해, 앱을 껐다 켠 뒤에도 **네트워크 조회 없이** 바로 리더로 진입하고 백그라운드에서 목록을 대조한다.
 - 받은 파일은 세션 캐시(`cacheDir/sessions/<id>/`, 파일명 = entryId 해시), 세션 종료/삭제 시 삭제 + 시작 시
   찌꺼기 정리 + 400MB 상한.
 - **좌우 양면 스캔본**은 헤더(앞 64KB, `ImageHeader`)로 크기를 파싱해 좌/우로 분할(로컬·원격 모두). 설정에서 끄면 통짜.
-- **폴드/펼침·회전**은 `configChanges` 로 Activity 재생성 없이, `CurlView` 가 크기만 다시 잡아 단면↔양면까지 전환.
+- **폴드/펼침·회전**은 `configChanges` 로 Activity 재생성 없이, `PageFlipView.onConfigChanged` 가 표면만 다시
+  잡아 단면↔양면까지 전환. `onDrawFrame` 은 재구성 중 예외를 삼킨다.
 - 구글 드라이브는 앱 시작 시 백그라운드로 토큰 + 최근 세션 폴더 목록을 미리 데워 첫 로딩을 줄인다.
 - 갤럭시 폴드: 살짝 접었다 펴면 다음 페이지 (`androidx.window`, 설정 토글).
 
@@ -69,9 +65,9 @@ AGP 8.7.3 / Kotlin 2.1.0 / Gradle 8.14.3 / compileSdk 35 / minSdk 26.
 릴리즈 서명 SHA-1 `3A:21:F0:1D:0F:80:01:04:1C:31:82:2E:87:25:55:65:43:C2:17:73`.
 
 ## 검증 상태
-- `assembleDebug` / `assembleRelease` / 단위 테스트(CurlEngine · SessionManifest · 자연 정렬 · SpreadPolicy · ImageHeader) **통과**.
+- `assembleDebug` / `assembleRelease` / 단위 테스트(SessionManifest · 자연 정렬 · SpreadPolicy · ImageHeader) **통과**.
 - 이 PC는 RAM 부족으로 에뮬레이터 구동 불가 → **실기기에서 `installDebug` 로 실제 동작 확인 필요.**
-  특히 컬 애니메이션 성능(drawBitmapMesh)·RTL·양면 leaf 넘김·폴드 전환은 기기 확인 필요.
+  특히 RTL 넘김(효과 반전 없이 순번만 역순)·양면·폴드 전환·홈 복귀는 기기 확인 필요.
 - 앱 아이콘은 런처가 캐시하므로 **기존 앱 삭제 후 재설치**해야 새 아이콘이 보인다.
 - 다운로드 기능은 화면을 벗어나면(다른 탭 이동 등) 중단됨 — 완료까지 화면 유지 권장.
 
@@ -82,9 +78,10 @@ AGP 8.7.3 / Kotlin 2.1.0 / Gradle 8.14.3 / compileSdk 35 / minSdk 26.
 | `ui/HomeScreen / BrowseScreen / BrowseFolderScreen / SettingsScreen / AddConnection` | 화면들 |
 | `Models.kt` / `Stores.kt` | Session · Connection 모델과 JSON 스토어(StateFlow) |
 | `StorageBackend.kt` / `SmbBackend.kt` / `DriveBackend.kt` | 로컬/SMB/Drive 공통 접근 |
-| `reader/CurlEngine.kt` | 종이 컬 기하(순수 계산, 테스트 있음) |
-| `reader/CurlView.kt` | 커스텀 View — drawBitmapMesh 로 컬 렌더 + 터치 |
+| `PageFlipView.kt` / `PageRender.kt` | eschao PageFlip 연동 (회색→실제 텍스처 1회 교체) |
+| `PageImageProvider.kt` | 라이브러리 페이지번호→비트맵. RTL 은 여기서 순번을 역순 매핑 |
 | `reader/PageSource.kt` | 창 방식 비동기 로더 + 세션 캐시 |
 | `reader/SessionManifest.kt` | 이어보기 즉시 열기용 목록 스냅샷(JSON, 테스트 있음) |
+| `pageflip/` | 벤더링한 eschao PageFlip (Apache-2.0) |
 | `SessionCache.kt` | 세션 캐시 디렉터리 관리 + 찌꺼기 정리 |
 | `NaturalOrder.kt` / `SpreadPolicy.kt` | 자연 정렬 · 스프레드 확장 (테스트 있음) |

@@ -43,7 +43,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
-import com.foldbook.reader.CurlView
+import com.foldbook.PageFlipView
 import com.foldbook.ReadingDirection
 import com.foldbook.SpreadMode
 import kotlin.math.roundToInt
@@ -69,7 +69,7 @@ fun ReaderScreen(
     var settings by remember { mutableStateOf(false) }
 
     LaunchedEffect(ready) {
-        (flipViewProvider() as? CurlView)?.onTap = { chrome = !chrome }
+        (flipViewProvider() as? PageFlipView)?.onTap = { chrome = !chrome }
     }
 
     Box(Modifier.fillMaxSize().background(Color.Black)) {

@@ -18,7 +18,6 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.lifecycleScope
-import com.foldbook.reader.CurlView
 import com.foldbook.reader.PageSource
 import com.foldbook.reader.SessionManifestStore
 import com.foldbook.ui.FoldBookTheme
@@ -49,7 +48,7 @@ class ReaderActivity : ComponentActivity() {
     private lateinit var backend: StorageBackend
     private lateinit var conn: Connection
     private var source: PageSource? = null
-    private var curlView: CurlView? = null
+    private var flip: PageFlipView? = null
 
     private var session: Session? = null
     private var folderId: String = ""
@@ -87,9 +86,9 @@ class ReaderActivity : ComponentActivity() {
                     total = totalPages,
                     title = title,
                     rtl = rtl,
-                    flipViewProvider = { curlView },
+                    flipViewProvider = { flip },
                     onBack = { finish() },
-                    onJump = { n -> curlView?.goTo(n) },
+                    onJump = { n -> flip?.goTo(n) },
                     spreadMode = Prefs(this).spreadMode,
                     direction = curDirection,
                     onChangeSpread = { m -> Prefs(this).spreadMode = m; recreate() },
@@ -144,7 +143,7 @@ class ReaderActivity : ComponentActivity() {
 
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
-        curlView?.let { outState.putInt(SAVED_PAGE, it.currentPage) }
+        flip?.let { outState.putInt(SAVED_PAGE, it.currentPageNumber()) }
     }
 
     /** 폴드/펼침·회전으로 화면이 바뀌어도 Activity 를 재생성하지 않고(manifest configChanges) 그 자리에서 대응. */
@@ -153,7 +152,7 @@ class ReaderActivity : ComponentActivity() {
         immersive()
         val wide = newConfig.orientation == Configuration.ORIENTATION_LANDSCAPE ||
             newConfig.smallestScreenWidthDp >= 600
-        curlView?.onConfigChanged(wantDouble(Prefs(this), wide, newConfig))
+        flip?.onConfigChanged(wantDouble(Prefs(this), wide, newConfig))
     }
 
     private fun wantDouble(prefs: Prefs, wide: Boolean, cfg: Configuration) =
@@ -282,13 +281,13 @@ class ReaderActivity : ComponentActivity() {
         val prefs = Prefs(this)
         val cacheDir = SessionCache.dir(this, s.id)
         val src = PageSource(backend, pages, cacheDir, lifecycleScope, prefs.prefetchForward)
-        val view = CurlView(this, src, startPage, rtl = readingRtl, doublePage = doubleMode)
+        val provider = PageImageProvider(src, rtl = readingRtl)
+        val view = PageFlipView(this, provider, startPage, doubleMode, rtl = readingRtl)
         view.onBoundary = { fwd -> onBoundary(fwd) }
         view.onPageSettled = { n -> pageNum = n; saveProgress(n) }
-        src.focus(startPage - 1)
 
         source = src
-        curlView = view
+        flip = view
         rtl = readingRtl
         curDirection = dir
         title = fName.ifBlank { s.folderName }
@@ -388,12 +387,12 @@ class ReaderActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        curlView?.onResume()
+        flip?.onResume()
     }
 
     override fun onPause() {
         super.onPause()
-        curlView?.onPause()
+        flip?.onPause()
         session?.let { app.sessions.upsert(it) }
     }
 

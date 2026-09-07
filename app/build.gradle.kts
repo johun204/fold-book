@@ -21,8 +21,8 @@ android {
         applicationId = "com.foldbook"
         minSdk = 26
         targetSdk = 35
-        versionCode = 7
-        versionName = "0.5.0"
+        versionCode = 8
+        versionName = "0.5.1"
     }
 
     signingConfigs {
@@ -73,7 +73,8 @@ dependencies {
     implementation("androidx.navigation:navigation-compose:2.8.5")
     debugImplementation("androidx.compose.ui:ui-tooling")
 
-    // 3D 종이책 페이지 넘김은 reader/CurlView + CurlEngine 로 직접 구현 (Canvas.drawBitmapMesh)
+    // 3D 종이책 페이지 넘김 — eschao/android-PageFlip 벤더링 (pageflip/ 참고)
+    implementation(project(":pageflip"))
 
     // 폴더블 접힘 센서
     implementation("androidx.window:window:1.3.0")
