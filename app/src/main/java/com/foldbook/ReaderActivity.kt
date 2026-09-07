@@ -18,6 +18,9 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.lifecycleScope
+import com.foldbook.reader.CurlView
+import com.foldbook.reader.PageSource
+import com.foldbook.reader.SessionManifestStore
 import com.foldbook.ui.FoldBookTheme
 import com.foldbook.ui.ReaderScreen
 import kotlinx.coroutines.Dispatchers
@@ -29,6 +32,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 
@@ -44,8 +48,8 @@ class ReaderActivity : ComponentActivity() {
     private lateinit var app: App
     private lateinit var backend: StorageBackend
     private lateinit var conn: Connection
-    private lateinit var stream: PageStream
-    private var flip: PageFlipView? = null
+    private var source: PageSource? = null
+    private var curlView: CurlView? = null
 
     private var session: Session? = null
     private var folderId: String = ""
@@ -83,9 +87,9 @@ class ReaderActivity : ComponentActivity() {
                     total = totalPages,
                     title = title,
                     rtl = rtl,
-                    flipViewProvider = { flip },
+                    flipViewProvider = { curlView },
                     onBack = { finish() },
-                    onJump = { n -> flip?.goTo(n) },
+                    onJump = { n -> curlView?.goTo(n) },
                     spreadMode = Prefs(this).spreadMode,
                     direction = curDirection,
                     onChangeSpread = { m -> Prefs(this).spreadMode = m; recreate() },
@@ -140,7 +144,7 @@ class ReaderActivity : ComponentActivity() {
 
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
-        flip?.let { outState.putInt(SAVED_PAGE, it.currentPageNumber()) }
+        curlView?.let { outState.putInt(SAVED_PAGE, it.currentPage) }
     }
 
     /** 폴드/펼침·회전으로 화면이 바뀌어도 Activity 를 재생성하지 않고(manifest configChanges) 그 자리에서 대응. */
@@ -149,8 +153,11 @@ class ReaderActivity : ComponentActivity() {
         immersive()
         val wide = newConfig.orientation == Configuration.ORIENTATION_LANDSCAPE ||
             newConfig.smallestScreenWidthDp >= 600
-        flip?.onConfigChanged(Prefs(this).doublePage(wide))
+        curlView?.onConfigChanged(wantDouble(Prefs(this), wide, newConfig))
     }
+
+    private fun wantDouble(prefs: Prefs, wide: Boolean, cfg: Configuration) =
+        prefs.doublePage(wide) && cfg.orientation == Configuration.ORIENTATION_LANDSCAPE
 
     private data class Args(
         val connId: String, val folderId: String, val folderName: String,
@@ -181,6 +188,32 @@ class ReaderActivity : ComponentActivity() {
     private suspend fun setup(fId: String, fName: String, startEntryId: String?, sessionId: String?) {
         backend = backendFor(conn, applicationContext)
 
+        var s = sessionId?.let { app.sessions.get(it) }
+            ?: app.sessions.findOrCreate(conn, fId, fName)
+        if (s.finished) s = s.copy(finished = false, pageIndex = 0)   // 완료 세션 다시 열면 처음부터
+        session = s
+
+        val prefs = Prefs(this)
+        val dir = s.directionOverride ?: prefs.direction
+        val wide = isWideScreen()
+        val doubleMode = prefs.doublePage(wide) &&
+            resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+        val cacheDir = SessionCache.dir(this, s.id)
+
+        // --- 빠른 경로: 저장된 매니페스트로 네트워크 없이 즉시 열기 ---
+        val manifest = if (startEntryId == null) SessionManifestStore.load(cacheDir) else null
+        if (manifest != null && manifest.connectionId == conn.id && manifest.folderId == fId &&
+            manifest.entries.isNotEmpty()
+        ) {
+            val images = manifest.asEntries()
+            images.forEach { DimsCache.put("${conn.id}|${it.id}", manifest.dimOf(it.id)) }
+            val pages = SpreadPolicy.expand(images, dir, doubleMode, prefs.splitWideScans) { manifest.dimOf(it) }
+            buildReader(pages, dir, doubleMode, s, fName, startEntryId = null, startAtEnd = false)
+            refreshInBackground(fId, dir, doubleMode, prefs, cacheDir, manifest.entryIds())
+            return
+        }
+
+        // --- 느린 경로: 폴더 조회 + 스캔본 분석 + 매니페스트 기록 ---
         val images = try {
             backend.list(fId).filter { !it.isDir }
         } catch (e: Exception) {
@@ -188,34 +221,48 @@ class ReaderActivity : ComponentActivity() {
         }
         if (images.isEmpty()) { toast(getString(R.string.err_empty)); finish(); return }
 
-        var s = sessionId?.let { app.sessions.get(it) }
-            ?: app.sessions.findOrCreate(conn, fId, fName)
-        if (s.finished) s = s.copy(finished = false, pageIndex = 0)   // 완료 세션 다시 열면 처음부터
-
-        val prefs = Prefs(this)
-        val dir = s.directionOverride ?: prefs.direction   // 이 책만의 방향이 있으면 우선
-        val readingRtl = dir == ReadingDirection.RTL
-        val wide = isWideScreen()
-        val autoPage = prefs.doublePage(wide)
-        val doubleMode = autoPage &&
-            resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
-
-        val analyze = prefs.splitWideScans &&
-            (conn.type == ConnType.LOCAL || prefs.analyzeRemote)
+        val analyze = prefs.splitWideScans && (conn.type == ConnType.LOCAL || prefs.analyzeRemote)
         val dimsMap = if (analyze) scanSizes(images) else emptyMap()
+        SessionManifestStore.save(cacheDir, conn.id, fId, dir, images, dimsMap)
+
         val pages = SpreadPolicy.expand(images, dir, doubleMode, prefs.splitWideScans) { id -> dimsMap[id] }
+        buildReader(pages, dir, doubleMode, s, fName, startEntryId, intent.getBooleanExtra(EXTRA_START_AT_END, false))
+    }
 
-        val startEntryIdx =
-            if (startEntryId != null) images.indexOfFirst { it.id == startEntryId }.coerceAtLeast(0) else 0
-        val startEntry = images[startEntryIdx].id
-        val startPageIdx = pages.indexOfFirst { it.entryId == startEntry }.coerceAtLeast(0)
+    /** 매니페스트로 연 뒤, 실제 목록과 대조해 달라졌으면 매니페스트만 갱신(다음 열람에 반영). */
+    private fun refreshInBackground(
+        fId: String, dir: ReadingDirection, doubleMode: Boolean, prefs: Prefs,
+        cacheDir: File, knownIds: List<String>,
+    ) {
+        lifecycleScope.launch(Dispatchers.IO) {
+            val fresh = runCatching { backend.list(fId).filter { !it.isDir } }.getOrNull() ?: return@launch
+            if (fresh.isEmpty() || fresh.map { it.id } == knownIds) return@launch
+            val analyze = prefs.splitWideScans && (conn.type == ConnType.LOCAL || prefs.analyzeRemote)
+            val dimsMap = if (analyze) scanSizes(fresh) else emptyMap()
+            SessionManifestStore.save(cacheDir, conn.id, fId, dir, fresh, dimsMap)
+            withContext(Dispatchers.Main) {
+                toast("폴더 내용이 바뀌었어요 — 다시 열면 반영됩니다")
+            }
+        }
+    }
 
-        val startAtEnd = intent.getBooleanExtra(EXTRA_START_AT_END, false)
+    private fun buildReader(
+        pages: List<PageRef>, dir: ReadingDirection, doubleMode: Boolean,
+        sessionIn: Session, fName: String, startEntryId: String?, startAtEnd: Boolean,
+    ) {
+        if (pages.isEmpty()) { toast(getString(R.string.err_empty)); finish(); return }
+        var s = sessionIn
+        val readingRtl = dir == ReadingDirection.RTL
+
+        val startPageIdx = startEntryId
+            ?.let { e -> pages.indexOfFirst { it.entryId == e } }
+            ?.takeIf { it >= 0 } ?: 0
+
         var startPage = when {
             restoredPage in 1..pages.size -> restoredPage
             startEntryId != null -> startPageIdx + 1
-            s.pageIndex in pages.indices && s.pageIndex > 0 -> s.pageIndex + 1  // 실제 진행 이력 우선
-            startAtEnd -> pages.size                                            // 이전 권을 끝에서 열기
+            s.pageIndex in pages.indices && s.pageIndex > 0 -> s.pageIndex + 1
+            startAtEnd -> pages.size
             s.pageIndex in pages.indices -> s.pageIndex + 1
             else -> 1
         }
@@ -232,16 +279,16 @@ class ReaderActivity : ComponentActivity() {
         app.sessions.upsert(s)
         session = s
 
+        val prefs = Prefs(this)
         val cacheDir = SessionCache.dir(this, s.id)
-        stream = PageStream(backend, pages, cacheDir, lifecycleScope, prefs.prefetchForward, mirror = readingRtl)
-        val provider = PageImageProvider(stream)
+        val src = PageSource(backend, pages, cacheDir, lifecycleScope, prefs.prefetchForward)
+        val view = CurlView(this, src, startPage, rtl = readingRtl, doublePage = doubleMode)
+        view.onBoundary = { fwd -> onBoundary(fwd) }
+        view.onPageSettled = { n -> pageNum = n; saveProgress(n) }
+        src.focus(startPage - 1)
 
-        val v = PageFlipView(this, provider, startPage, autoPage, rtl = readingRtl)
-        v.onBoundary = { fwd -> onBoundary(fwd) }
-        v.onPageSettled = { n -> pageNum = n; saveProgress(n) }
-        stream.focus(startPage - 1)
-        flip = v
-
+        source = src
+        curlView = view
         rtl = readingRtl
         curDirection = dir
         title = fName.ifBlank { s.folderName }
@@ -249,7 +296,7 @@ class ReaderActivity : ComponentActivity() {
         pageNum = startPage
         ready = true
 
-        if (prefs.foldFlip) FoldGestureDetector(this) { v.flipForward() }.start()
+        if (prefs.foldFlip) FoldGestureDetector(this) { view.flipForward() }.start()
     }
 
     private suspend fun scanSizes(images: List<Entry>): Map<String, Pair<Int, Int>?> {
@@ -292,20 +339,17 @@ class ReaderActivity : ComponentActivity() {
                 val target = runCatching { adjacentFolder(forward) }.getOrNull()
 
                 if (!forward) {
-                    // 첫 페이지에서 뒤로 → 이전 권으로 갈지 묻거나, 첫 권이면 못 간다고 알림
                     boundaryPrompt = if (target != null) BoundaryPrompt.PrevVolume(target)
                     else BoundaryPrompt.NoPrev
                     return@launch
                 }
 
                 if (target == null) {
-                    // 마지막 권 — 알림만, 폴더 이동/종료는 하지 않는다.
                     toast(getString(R.string.last_folder))
                     return@launch
                 }
-                // 현재 세션 = 완료 처리, 받아둔 미리불러오기 캐시는 정리하고 다음 권으로
                 app.sessions.upsert(cur.copy(finished = true, pageIndex = (cur.pageCount - 1).coerceAtLeast(0)))
-                if (::stream.isInitialized) stream.close()
+                source?.close()
                 SessionCache.clear(this@ReaderActivity, cur.id)
                 openFolder(target, atEnd = false)
             } finally {
@@ -344,18 +388,18 @@ class ReaderActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        flip?.onResume()
+        curlView?.onResume()
     }
 
     override fun onPause() {
         super.onPause()
-        flip?.onPause()
+        curlView?.onPause()
         session?.let { app.sessions.upsert(it) }
     }
 
     override fun onDestroy() {
         super.onDestroy()
-        if (!rolling && ::stream.isInitialized) stream.close()
+        if (!rolling) source?.close()
     }
 
     private fun isWideScreen(): Boolean {

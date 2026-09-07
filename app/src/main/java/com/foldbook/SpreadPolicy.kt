@@ -12,14 +12,14 @@ object SpreadPolicy {
     /** 가로/세로 비가 이 값 이상이면 좌우 양면 스캔본으로 간주한다. */
     const val SPREAD_ASPECT = 1.0f
 
-    /** 단면 이미지를 두 장씩 묶어 양면으로 보여줄지 (eschao 오토 페이지 모드). */
+    /** 단면 이미지를 두 장씩 묶어 양면으로 보여줄지. */
     fun doublePage(mode: SpreadMode, wideScreen: Boolean): Boolean = when (mode) {
         SpreadMode.SINGLE -> false
         SpreadMode.DOUBLE -> true
         SpreadMode.AUTO -> wideScreen
     }
 
-    /** 빈 페이지(양면 정렬용 여백). entryId 가 비어 있으면 PageStream 이 어두운 여백으로 그린다. */
+    /** 빈 페이지(양면 정렬용 여백). entryId 가 비어 있으면 PageSource 가 어두운 여백으로 그린다. */
     val BLANK = PageRef("", "", Half.WHOLE)
 
     /**

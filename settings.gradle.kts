@@ -14,4 +14,3 @@ dependencyResolutionManagement {
 }
 rootProject.name = "ComicViewer"
 include(":app")
-include(":pageflip")
