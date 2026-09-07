@@ -29,19 +29,18 @@ class SpreadPolicyTest {
         assertEquals(listOf(Half.WHOLE, Half.LEFT, Half.RIGHT), pages.map { it.half })
     }
 
-    @Test fun `double mode splits spread visually left then right`() {
-        // 스프레드가 맨 앞(짝수 경계)이면 여백 없이 바로 L,R
+    @Test fun `double mode splits spread following reading direction`() {
+        // RTL: 오른쪽 먼저. 뷰가 좌우 반전되므로 이 순서 그대로가 화면에 맞다.
         val pages = SpreadPolicy.expand(listOf(b), ReadingDirection.RTL, doubleMode = true, split = true, dims = dims)
-        assertEquals(listOf(Half.LEFT, Half.RIGHT), pages.map { it.half })
+        assertEquals(listOf(Half.RIGHT, Half.LEFT), pages.map { it.half })
         assertEquals(listOf("b", "b"), pages.map { it.entryId })
     }
 
     @Test fun `double mode inserts a blank so spread fills one pair`() {
         // a(단면) 뒤에 스프레드 -> 홀수 경계라 앞에 빈 페이지 삽입 -> 스프레드가 (홀,짝) 페어에 통째로
         val pages = SpreadPolicy.expand(images, ReadingDirection.RTL, doubleMode = true, split = true, dims = dims)
-        assertEquals(listOf(Half.WHOLE, Half.WHOLE, Half.LEFT, Half.RIGHT), pages.map { it.half })
+        assertEquals(listOf(Half.WHOLE, Half.WHOLE, Half.RIGHT, Half.LEFT), pages.map { it.half })
         assertEquals("", pages[1].entryId)              // 빈 페이지
-        assertEquals(3 % 2, 1)                          // spread LEFT 는 1-based 3 = 홀수
     }
 
     @Test fun `single-page scan is never split`() {

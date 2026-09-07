@@ -42,6 +42,7 @@ data class Session(
     val pageIndex: Int = 0,             // 마지막으로 본 리더 페이지(0-based)
     val pageCount: Int = 0,             // 전체 리더 페이지 수(0 = 미확정)
     val updatedAt: Long = 0L,
+    val finished: Boolean = false,      // 폴더 끝까지 다 봄 → 홈의 '완료' 그룹
 )
 
 /** 폴더 탐색 항목. */

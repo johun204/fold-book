@@ -21,10 +21,10 @@ object SpreadPolicy {
 
     /**
      * 이미지 목록을 리더 페이지 목록으로 확장한다.
-     * - 좌우 양면 스캔본(가로가 긴 이미지)은 **항상** 두 장으로 나눈다. 화면·기기와 무관하게
-     *   페이지 인덱스가 일정하고(이어보기 안정), 양면 모드에선 좌/우 절반이 두 슬롯을 채워 원래 스프레드처럼 보인다.
-     * - 양면 모드: 두 절반을 시각적 좌→우 순서로, 그리고 스프레드가 항상 (홀,짝) 페어에 통째로 들어가도록
-     *   필요하면 앞에 빈 페이지 하나를 끼운다. 단면(한 쪽씩) 볼 땐 읽기 방향만 따른다.
+     * - 좌우 양면 스캔본(가로가 긴 이미지)은 화면·기기와 무관하게 **항상** 두 장으로 나눈다
+     *   (페이지 인덱스가 일정 → 이어보기 안정, 양면 모드에선 두 절반이 두 슬롯을 채워 스프레드로 보임).
+     * - 절반 순서는 읽기 방향을 따른다(RTL=오른쪽 먼저). 뷰가 RTL 에서 좌우 반전되므로 이 순서 그대로가 화면에 맞다.
+     * - 양면 모드에선 스프레드가 (홀,짝) 페어에 통째로 들어가도록 필요하면 앞에 빈 페이지를 끼운다.
      * - dims 가 null(원격 등 크기 미상)이면 스프레드 판정 불가 → 통짜.
      */
     fun expand(
@@ -35,17 +35,14 @@ object SpreadPolicy {
         dims: (entryId: String) -> Pair<Int, Int>?,
     ): List<PageRef> {
         val out = ArrayList<PageRef>(images.size)
+        val halves = if (dir == ReadingDirection.RTL) listOf(Half.RIGHT, Half.LEFT)
+        else listOf(Half.LEFT, Half.RIGHT)
         for (e in images) {
             val d = if (split) dims(e.id) else null
             val spread = d != null && d.first > 0 && d.second > 0 &&
                 d.first.toFloat() / d.second >= SPREAD_ASPECT
             if (spread) {
-                if (doubleMode && out.size % 2 == 1) out += BLANK  // 왼쪽 절반을 페어의 왼쪽으로
-                val halves = when {
-                    doubleMode -> listOf(Half.LEFT, Half.RIGHT)
-                    dir == ReadingDirection.RTL -> listOf(Half.RIGHT, Half.LEFT)
-                    else -> listOf(Half.LEFT, Half.RIGHT)
-                }
+                if (doubleMode && out.size % 2 == 1) out += BLANK  // 스프레드를 한 페어에
                 halves.forEach { out += PageRef(e.id, e.name, it) }
             } else {
                 out += PageRef(e.id, e.name, Half.WHOLE)

@@ -48,4 +48,8 @@ object AppIcons {
         "Download",
         "M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z",
     )
+    val DeleteSweep = icon(
+        "DeleteSweep",
+        "M15 16h4v2h-4zM15 8h7v2h-7zM15 12h6v2h-6zM3 18c0 1.1 0.9 2 2 2h6c1.1 0 2 -0.9 2 -2V8H3zM14 5h-3l-1 -1H6L5 5H2v2h12z",
+    )
 }

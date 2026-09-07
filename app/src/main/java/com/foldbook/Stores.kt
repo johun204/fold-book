@@ -89,5 +89,13 @@ class SessionStore(context: Context) {
         saveList(file, _flow.value)
     }
 
-    fun activeIds(): Set<String> = _flow.value.map { it.id }.toSet()
+    fun finishedIds(): List<String> = _flow.value.filter { it.finished }.map { it.id }
+
+    fun clearFinished() {
+        _flow.value = _flow.value.filterNot { it.finished }
+        saveList(file, _flow.value)
+    }
+
+    /** 캐시 스윕 기준: 아직 안 끝난 세션만 유지 대상. */
+    fun activeIds(): Set<String> = _flow.value.filterNot { it.finished }.map { it.id }.toSet()
 }

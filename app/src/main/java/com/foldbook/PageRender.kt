@@ -42,6 +42,17 @@ abstract class PageRender(
         secondReal = false
     }
 
+    /** 스크러버로 특정 페이지로 점프. GL 스레드에서 호출할 것. */
+    fun jumpTo(pageNumber: Int) {
+        pageNo = pageNumber.coerceIn(1, maxOf(1, provider.count))
+        firstReal = false
+        secondReal = false
+        drawCommand = DRAW_FULL_PAGE
+        pageFlip.firstPage?.deleteAllTextures()
+        pageFlip.secondPage?.deleteAllTextures()
+        settled()
+    }
+
     fun onFingerMove(): Boolean {
         drawCommand = DRAW_MOVING_FRAME
         return true

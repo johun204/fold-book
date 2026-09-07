@@ -81,7 +81,7 @@ public class PageFlip {
     private final static float WIDTH_RATIO_OF_CLICK_TO_FLIP = 0.5f;
 
     // width ratio of triggering restore flip
-    private final static float WIDTH_RATIO_OF_RESTORE_FLIP = 0.4f;
+    private final static float WIDTH_RATIO_OF_RESTORE_FLIP = 0.5f;
 
     // folder page shadow color buffer size
     private final static int FOLD_TOP_EDGE_SHADOW_VEX_COUNT = 22;

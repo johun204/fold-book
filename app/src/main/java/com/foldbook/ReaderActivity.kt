@@ -2,23 +2,26 @@ package com.foldbook
 
 import android.content.Intent
 import android.content.res.Configuration
-import android.graphics.Color
 import android.os.Bundle
-import android.view.Gravity
 import android.view.WindowManager
-import android.widget.FrameLayout
-import android.widget.ProgressBar
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.lifecycleScope
+import com.foldbook.ui.FoldBookTheme
+import com.foldbook.ui.ReaderScreen
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
@@ -39,7 +42,7 @@ class ReaderActivity : ComponentActivity() {
     private lateinit var backend: StorageBackend
     private lateinit var conn: Connection
     private lateinit var stream: PageStream
-    private lateinit var view: PageFlipView
+    private var flip: PageFlipView? = null
 
     private var session: Session? = null
     private var folderId: String = ""
@@ -47,19 +50,39 @@ class ReaderActivity : ComponentActivity() {
     private var saveJob: Job? = null
     private var restoredPage = 0
 
+    // Compose 상태
+    private var ready by mutableStateOf(false)
+    private var pageNum by mutableIntStateOf(1)
+    private var totalPages by mutableIntStateOf(0)
+    private var title by mutableStateOf("")
+    private var rtl by mutableStateOf(false)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         app = App.of(this)
         immersive()
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        setContentView(FrameLayout(this).apply {
-            setBackgroundColor(Color.BLACK)
-            addView(ProgressBar(this@ReaderActivity), FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.CENTER))
-        })
 
-        // 폴드/회전 등으로 재생성되면 저장해둔 현재 페이지에서 이어감
         restoredPage = savedInstanceState?.getInt(SAVED_PAGE, 0) ?: 0
+
+        setContent {
+            FoldBookTheme {
+                ReaderScreen(
+                    ready = ready,
+                    page = pageNum,
+                    total = totalPages,
+                    title = title,
+                    rtl = rtl,
+                    flipViewProvider = { flip },
+                    onBack = { finish() },
+                    onJump = { n -> flip?.goTo(n) },
+                    spreadMode = Prefs(this).spreadMode,
+                    direction = Prefs(this).direction,
+                    onChangeSpread = { m -> Prefs(this).spreadMode = m; recreate() },
+                    onChangeDirection = { d -> Prefs(this).direction = d; recreate() },
+                )
+            }
+        }
 
         val (connId, fId, fName, startEntry, sessionId) = parseIntent() ?: run {
             toast(getString(R.string.err_path)); finish(); return
@@ -74,7 +97,7 @@ class ReaderActivity : ComponentActivity() {
 
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
-        if (::view.isInitialized) outState.putInt(SAVED_PAGE, view.currentPageNumber())
+        flip?.let { outState.putInt(SAVED_PAGE, it.currentPageNumber()) }
     }
 
     private data class Args(
@@ -92,7 +115,6 @@ class ReaderActivity : ComponentActivity() {
                 intent.getStringExtra(EXTRA_SESSION_ID),
             )
         }
-        // 다른 앱에서 이미지 열기 (ACTION_VIEW)
         val uri = intent.data ?: return null
         val path = resolveToFilePath(uri) ?: return null
         val f = File(path)
@@ -115,9 +137,9 @@ class ReaderActivity : ComponentActivity() {
         if (images.isEmpty()) { toast(getString(R.string.err_empty)); finish(); return }
 
         val prefs = Prefs(this)
+        val readingRtl = prefs.direction == ReadingDirection.RTL
         val wide = isWideScreen()
         val autoPage = prefs.doublePage(wide)
-        // eschao 는 가로일 때만 실제로 양면 렌더 -> 여백 삽입/좌우순서도 그 조건에 맞춘다
         val doubleMode = autoPage &&
             resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
 
@@ -133,39 +155,45 @@ class ReaderActivity : ComponentActivity() {
 
         var s = sessionId?.let { app.sessions.get(it) }
             ?: app.sessions.findOrCreate(conn, fId, fName)
+        if (s.finished) s = s.copy(finished = false, pageIndex = 0)   // 완료 세션 다시 열면 처음부터
+
         var startPage = when {
             restoredPage in 1..pages.size -> restoredPage
             startEntryId != null -> startPageIdx + 1
             s.pageIndex in pages.indices -> s.pageIndex + 1
             else -> 1
         }
-        // 양면 모드에서는 페어의 왼쪽(홀수, 1-based)로 스냅해야 좌/우 짝이 안 어긋남
         if (doubleMode && startPage % 2 == 0) startPage = (startPage - 1).coerceAtLeast(1)
-        // 최초 setup 이후 재생성 시엔 세션 위치로 이어가도록 시작 이미지 지정 제거
         intent.removeExtra(EXTRA_START_ENTRY_ID)
 
         s = s.copy(
             pageCount = pages.size,
             pageIndex = (startPage - 1).coerceIn(0, (pages.size - 1).coerceAtLeast(0)),
             folderName = fName.ifBlank { s.folderName },
+            finished = false,
         )
         app.sessions.upsert(s)
         session = s
 
         val cacheDir = SessionCache.dir(this, s.id)
-        stream = PageStream(backend, pages, cacheDir, lifecycleScope, prefs.prefetchForward)
+        stream = PageStream(backend, pages, cacheDir, lifecycleScope, prefs.prefetchForward, mirror = readingRtl)
         val provider = PageImageProvider(stream)
 
-        view = PageFlipView(this, provider, startPage, autoPage)
-        view.onBoundary = { fwd -> onBoundary(fwd) }
-        view.onPageSettled = { n -> saveProgress(n) }
+        val v = PageFlipView(this, provider, startPage, autoPage, rtl = readingRtl)
+        v.onBoundary = { fwd -> onBoundary(fwd) }
+        v.onPageSettled = { n -> pageNum = n; saveProgress(n) }
         stream.focus(startPage - 1)
-        setContentView(view)
+        flip = v
 
-        if (prefs.foldFlip) FoldGestureDetector(this) { view.flipForward() }.start()
+        rtl = readingRtl
+        title = fName.ifBlank { s.folderName }
+        totalPages = pages.size
+        pageNum = startPage
+        ready = true
+
+        if (prefs.foldFlip) FoldGestureDetector(this) { v.flipForward() }.start()
     }
 
-    /** 이미지 크기 병렬 분석 (원격은 헤더만). 캐시 히트는 건너뛴다. */
     private suspend fun scanSizes(images: List<Entry>): Map<String, Pair<Int, Int>?> {
         val result = HashMap<String, Pair<Int, Int>?>(images.size)
         val todo = ArrayList<Entry>()
@@ -215,8 +243,8 @@ class ReaderActivity : ComponentActivity() {
                 null
             }
 
-            // 현재 세션 종료 + 캐시 정리
-            app.sessions.remove(cur.id)
+            // 현재 세션 = 완료 처리 (홈의 '완료' 그룹으로), 받아둔 캐시는 정리
+            app.sessions.upsert(cur.copy(finished = true, pageIndex = (cur.pageCount - 1).coerceAtLeast(0)))
             if (::stream.isInitialized) stream.close()
             SessionCache.clear(this@ReaderActivity, cur.id)
 
@@ -237,12 +265,12 @@ class ReaderActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        if (::view.isInitialized) view.onResume()
+        flip?.onResume()
     }
 
     override fun onPause() {
         super.onPause()
-        if (::view.isInitialized) view.onPause()
+        flip?.onPause()
         session?.let { app.sessions.upsert(it) }
     }
 
