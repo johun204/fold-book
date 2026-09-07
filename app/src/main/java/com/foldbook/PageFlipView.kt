@@ -8,13 +8,13 @@ import android.os.Looper
 import android.util.Log
 import android.view.MotionEvent
 import com.eschao.android.widget.pageflip.PageFlip
+import java.util.concurrent.locks.ReentrantLock
 import javax.microedition.khronos.egl.EGLConfig
 import javax.microedition.khronos.opengles.GL10
-import java.util.concurrent.locks.ReentrantLock
 
 /**
- * 종이책 3D 페이지 넘김 뷰. 드래그하는 손가락 위치를 그대로 따라 페이지가 말린다 (eschao PageFlip).
- * doublePage=true 면 가로 화면에서 좌우 두 페이지를 함께 보여준다 (세로 화면에서는 자동으로 한 장).
+ * 종이책 3D 페이지 넘김 뷰. 드래그하는 손가락 위치를 따라 페이지가 말린다 (eschao PageFlip).
+ * doublePage=true 면 가로 화면에서 좌우 두 페이지를 함께 보여준다 (세로에서는 자동으로 한 장).
  */
 class PageFlipView(
     context: Context,
@@ -24,8 +24,11 @@ class PageFlipView(
     private val duration: Int = 900,
 ) : GLSurfaceView(context), GLSurfaceView.Renderer {
 
-    /** 첫 페이지에서 뒤로 / 마지막 페이지에서 앞으로 넘기려 할 때 호출 (메인 스레드). */
+    /** 첫 페이지에서 뒤로 / 마지막 페이지에서 앞으로 넘기려 할 때 (메인 스레드). */
     var onBoundary: ((forward: Boolean) -> Unit)? = null
+
+    /** 페이지가 넘어가 자리잡을 때마다 현재 페이지 번호(1-based) 통지 (메인 스레드). */
+    var onPageSettled: ((pageNumber: Int) -> Unit)? = null
 
     val pageCount get() = provider.count
     fun currentPageNumber(): Int = render.pageNo
@@ -56,10 +59,22 @@ class PageFlipView(
             true
         }
 
-        render = PageRender.Single(pageFlip, handler, provider, startPage) { f -> onBoundary?.invoke(f) }
+        render = makeRender(PageRender.Single::class.java, startPage)
+
+        // 실제 이미지가 백그라운드에서 도착하면 다시 그려 회색->실제 교체
+        provider.stream.onReady = { queueEvent { requestRender() } }
 
         setRenderer(this)
         renderMode = RENDERMODE_WHEN_DIRTY
+    }
+
+    private fun makeRender(cls: Class<out PageRender>, pageNo: Int): PageRender {
+        val ob: (Boolean) -> Unit = { f -> onBoundary?.invoke(f) }
+        val os: (Int) -> Unit = { n -> provider.stream.focus(n - 1); onPageSettled?.invoke(n) }
+        return if (cls == PageRender.Double::class.java)
+            PageRender.Double(pageFlip, handler, provider, pageNo, ob, os)
+        else
+            PageRender.Single(pageFlip, handler, provider, pageNo, ob, os)
     }
 
     @SuppressLint("ClickableViewAccessibility")
@@ -74,11 +89,10 @@ class PageFlipView(
         return true
     }
 
-    /** 손대지 않고 다음 페이지로 넘긴다 (폴더블 접힘 제스처 등에서 호출). 오른쪽→왼쪽 스와이프를 흉내낸다. */
+    /** 손대지 않고 다음 페이지로 넘긴다 (폴더블 접힘 제스처 등). 오른쪽→왼쪽 스와이프 흉내. */
     fun flipForward() {
         if (width == 0 || pageFlip.isAnimating) return
         val y = height / 2f
-        // ponytail: 합성 제스처. eschao 가 move 이력이 짧다고 무시하면 중간 move 를 더 넣어 튜닝.
         fingerDown(width * 0.92f, y)
         fingerMove(width * 0.55f, y)
         fingerMove(width * 0.2f, y)
@@ -134,13 +148,14 @@ class PageFlipView(
                 if (wantDouble && render !is PageRender.Double) {
                     val n = render.pageNo
                     render.release()
-                    render = PageRender.Double(pageFlip, handler, provider, n) { f -> onBoundary?.invoke(f) }
+                    render = makeRender(PageRender.Double::class.java, n)
                 } else if (!wantDouble && render !is PageRender.Single) {
                     val n = render.pageNo
                     render.release()
-                    render = PageRender.Single(pageFlip, handler, provider, n) { f -> onBoundary?.invoke(f) }
+                    render = makeRender(PageRender.Single::class.java, n)
                 }
                 render.onSurfaceChanged()
+                provider.stream.focus(render.pageNo - 1)
             } finally {
                 lock.unlock()
             }

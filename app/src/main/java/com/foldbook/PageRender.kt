@@ -13,9 +13,10 @@ private const val DRAW_ANIMATING_FRAME = 1
 private const val DRAW_FULL_PAGE = 2
 
 /**
- * eschao Sample 의 PageRender / SinglePageRender / DoublePagesRender 를 Kotlin 으로 옮기고,
- * 텍스처 출처만 PageImageProvider(실제 만화 이미지)로 교체했다. (원본 Apache-2.0)
- * pageNo 는 화면 페이지 번호(1-based). 더블 모드에서는 왼쪽 페이지 번호.
+ * eschao Sample 의 렌더러 Kotlin 이식. 텍스처 출처는 PageImageProvider(창 방식 로더).
+ * 아직 안 받은 페이지는 회색이 나오고, 실제 비트맵이 도착하면 그 페이지 한정으로 텍스처를 한 번 교체한다
+ * (매 프레임 setFirstTexture 를 부르면 eschao 가 GL 텍스처를 계속 새로 만들어 누수됨 -> 1회로 제한).
+ * pageNo 는 리더 페이지 번호(1-based). 더블 모드에서는 왼쪽 페이지 번호.
  */
 abstract class PageRender(
     protected val pageFlip: PageFlip,
@@ -23,9 +24,12 @@ abstract class PageRender(
     protected val provider: PageImageProvider,
     var pageNo: Int,
     private val onBoundary: (forward: Boolean) -> Unit,
+    private val onSettled: (pageNumber: Int) -> Unit,
 ) : OnPageFlipListener {
 
     protected var drawCommand = DRAW_FULL_PAGE
+    protected var firstReal = false
+    protected var secondReal = false
 
     init {
         pageFlip.setListener(this)
@@ -34,6 +38,8 @@ abstract class PageRender(
     fun onSurfaceChanged() {
         val page = pageFlip.firstPage
         provider.setPageSize(page.width().toInt(), page.height().toInt())
+        firstReal = false
+        secondReal = false
     }
 
     fun onFingerMove(): Boolean {
@@ -56,7 +62,13 @@ abstract class PageRender(
         })
     }
 
-    /** 경계(첫/마지막 페이지)에서 넘김 시도를 막고, 메인 스레드로 콜백을 던진다. */
+    protected fun settled() {
+        firstReal = false
+        secondReal = false
+        val n = pageNo
+        handler.post { onSettled(n) }
+    }
+
     protected fun blockAtBoundary(forward: Boolean): Boolean {
         handler.post { onBoundary(forward) }
         return false
@@ -67,15 +79,14 @@ abstract class PageRender(
     }
 
     abstract fun onDrawFrame()
-
-    /** 애니메이션 프레임 종료 처리. 다시 그려야 하면 true. */
     abstract fun onEndedDrawing(what: Int): Boolean
 
-    // --- Single ---------------------------------------------------------------
+    // --- Single -------------------------------------------------------------
 
     class Single(
-        pf: PageFlip, h: Handler, p: PageImageProvider, pageNo: Int, ob: (Boolean) -> Unit,
-    ) : PageRender(pf, h, p, pageNo, ob) {
+        pf: PageFlip, h: Handler, p: PageImageProvider, pageNo: Int,
+        ob: (Boolean) -> Unit, os: (Int) -> Unit,
+    ) : PageRender(pf, h, p, pageNo, ob, os) {
 
         override fun onDrawFrame() {
             pageFlip.deleteUnusedTextures()
@@ -91,7 +102,14 @@ abstract class PageRender(
                     pageFlip.drawFlipFrame()
                 }
                 DRAW_FULL_PAGE -> {
-                    if (!page.isFirstTextureSet) page.setFirstTexture(provider.bitmap(pageNo))
+                    if (!page.isFirstTextureSet) {
+                        page.setFirstTexture(provider.bitmap(pageNo))
+                        firstReal = provider.isReal(pageNo)
+                    } else if (!firstReal && provider.isReal(pageNo)) {
+                        page.deleteAllTextures()
+                        page.setFirstTexture(provider.bitmap(pageNo))
+                        firstReal = true
+                    }
                     pageFlip.drawPageFrame()
                 }
             }
@@ -104,11 +122,19 @@ abstract class PageRender(
                 drawCommand = DRAW_ANIMATING_FRAME
                 return true
             }
-            if (pageFlip.flipState == PageFlipState.END_WITH_FORWARD) {
-                pageFlip.firstPage.setFirstTextureWithSecond()
-                pageNo++
+            when (pageFlip.flipState) {
+                PageFlipState.END_WITH_FORWARD -> {
+                    pageFlip.firstPage.setFirstTextureWithSecond()
+                    pageNo++
+                    drawCommand = DRAW_FULL_PAGE
+                    settled()
+                }
+                PageFlipState.END_WITH_BACKWARD -> {
+                    drawCommand = DRAW_FULL_PAGE
+                    settled()
+                }
+                else -> drawCommand = DRAW_FULL_PAGE
             }
-            drawCommand = DRAW_FULL_PAGE
             return true
         }
 
@@ -124,21 +150,32 @@ abstract class PageRender(
         }
     }
 
-    // --- Double -------------------------------------------------------------
+    // --- Double -----------------------------------------------------------
 
     class Double(
-        pf: PageFlip, h: Handler, p: PageImageProvider, pageNo: Int, ob: (Boolean) -> Unit,
-    ) : PageRender(pf, h, p, pageNo, ob) {
+        pf: PageFlip, h: Handler, p: PageImageProvider, pageNo: Int,
+        ob: (Boolean) -> Unit, os: (Int) -> Unit,
+    ) : PageRender(pf, h, p, pageNo, ob, os) {
 
         override fun onDrawFrame() {
             pageFlip.deleteUnusedTextures()
             val first = pageFlip.firstPage
             val second = pageFlip.secondPage ?: return
 
-            if (!first.isFirstTextureSet)
-                first.setFirstTexture(provider.bitmap(if (first.isLeftPage) pageNo else pageNo + 1))
-            if (!second.isFirstTextureSet)
-                second.setFirstTexture(provider.bitmap(if (second.isLeftPage) pageNo else pageNo + 1))
+            val nFirst = if (first.isLeftPage) pageNo else pageNo + 1
+            val nSecond = if (second.isLeftPage) pageNo else pageNo + 1
+            if (!first.isFirstTextureSet) {
+                first.setFirstTexture(provider.bitmap(nFirst)); firstReal = provider.isReal(nFirst)
+            } else if (!firstReal && provider.isReal(nFirst)) {
+                first.deleteAllTextures()
+                first.setFirstTexture(provider.bitmap(nFirst)); firstReal = true
+            }
+            if (!second.isFirstTextureSet) {
+                second.setFirstTexture(provider.bitmap(nSecond)); secondReal = provider.isReal(nSecond)
+            } else if (!secondReal && provider.isReal(nSecond)) {
+                second.deleteAllTextures()
+                second.setFirstTexture(provider.bitmap(nSecond)); secondReal = true
+            }
 
             when (drawCommand) {
                 DRAW_MOVING_FRAME, DRAW_ANIMATING_FRAME -> {
@@ -166,6 +203,9 @@ abstract class PageRender(
                     second.swapTexturesWithPage(first)
                     pageNo += if (first.isLeftPage) -2 else 2
                 }
+                drawCommand = DRAW_FULL_PAGE
+                settled()
+                return true
             }
             drawCommand = DRAW_FULL_PAGE
             return true

@@ -3,9 +3,11 @@ import java.util.Properties
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+    id("org.jetbrains.kotlin.plugin.compose")
+    id("org.jetbrains.kotlin.plugin.serialization")
 }
 
-// keystore.properties 가 있으면 release 서명에 사용 (없으면 release 는 미서명으로 빌드)
+// keystore.properties 가 있으면 release 서명에 사용 (없으면 release 는 미서명 빌드)
 val keystoreProps = Properties().apply {
     val f = rootProject.file("keystore.properties")
     if (f.exists()) f.inputStream().use { load(it) }
@@ -19,8 +21,8 @@ android {
         applicationId = "com.foldbook"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.0"
     }
 
     signingConfigs {
@@ -41,6 +43,9 @@ android {
             signingConfig = signingConfigs.findByName("release")
         }
     }
+    buildFeatures {
+        compose = true
+    }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -50,12 +55,23 @@ android {
 
 dependencies {
     implementation("androidx.core:core-ktx:1.13.1")
-    implementation("androidx.appcompat:appcompat:1.7.0")
-    implementation("androidx.preference:preference-ktx:1.2.1")
+    implementation("androidx.activity:activity-compose:1.9.3")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
 
-    // 3D 종이책 페이지 넘김 — eschao/android-PageFlip 을 로컬 모듈로 벤더링 (pageflip/ 참고).
+    implementation(platform("androidx.compose:compose-bom:2024.12.01"))
+    implementation("androidx.compose.ui:ui")
+    implementation("androidx.compose.ui:ui-graphics")
+    implementation("androidx.compose.ui:ui-tooling-preview")
+    implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.material:material-icons-core")
+    implementation("androidx.navigation:navigation-compose:2.8.5")
+    debugImplementation("androidx.compose.ui:ui-tooling")
+
+    // 3D 종이책 페이지 넘김 — eschao/android-PageFlip 벤더링 (pageflip/ 참고)
     implementation(project(":pageflip"))
 
     // 폴더블 접힘 센서

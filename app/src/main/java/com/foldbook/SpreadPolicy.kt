@@ -1,13 +1,8 @@
 package com.foldbook
 
-import java.io.File
-
 enum class ReadingDirection { LTR, RTL }
 enum class SpreadMode { AUTO, SINGLE, DOUBLE }
 enum class Half { WHOLE, LEFT, RIGHT }
-
-/** 한 화면 페이지가 참조하는 원본 이미지와, 좌우 스캔본일 때 어느 절반인지. */
-data class ReaderPage(val file: File, val half: Half)
 
 object SpreadPolicy {
 
@@ -29,24 +24,27 @@ object SpreadPolicy {
     }
 
     /**
-     * 원본 이미지 목록을 화면 페이지 목록으로 확장한다.
-     * splitSpreads 가 true 이고 해당 이미지가 좌우 스캔본이면 두 장(읽기 방향 순서)으로 나눈다.
+     * 이미지 목록을 리더 페이지 목록으로 확장한다.
+     * dims(id) 가 크기를 주고 splitSpreads=true 이며 가로가 길면 두 장(읽기 방향 순서)으로 나눈다.
+     * dims 가 null 이면(원격 등 크기 미상) 통짜로 둔다.
      */
     fun expand(
-        files: List<File>,
+        images: List<Entry>,
         splitSpreads: Boolean,
         dir: ReadingDirection,
-        isSpread: (File) -> Boolean,
-    ): List<ReaderPage> {
-        val out = ArrayList<ReaderPage>(files.size)
-        for (f in files) {
-            if (splitSpreads && isSpread(f)) {
-                val halves =
-                    if (dir == ReadingDirection.RTL) listOf(Half.RIGHT, Half.LEFT)
-                    else listOf(Half.LEFT, Half.RIGHT)
-                halves.forEach { out += ReaderPage(f, it) }
+        dims: (entryId: String) -> Pair<Int, Int>?,
+    ): List<PageRef> {
+        val out = ArrayList<PageRef>(images.size)
+        for (e in images) {
+            val d = if (splitSpreads) dims(e.id) else null
+            val spread = d != null && d.first > 0 && d.second > 0 &&
+                d.first.toFloat() / d.second >= SPREAD_ASPECT
+            if (spread) {
+                val halves = if (dir == ReadingDirection.RTL) listOf(Half.RIGHT, Half.LEFT)
+                else listOf(Half.LEFT, Half.RIGHT)
+                halves.forEach { out += PageRef(e.id, e.name, it) }
             } else {
-                out += ReaderPage(f, Half.WHOLE)
+                out += PageRef(e.id, e.name, Half.WHOLE)
             }
         }
         return out
