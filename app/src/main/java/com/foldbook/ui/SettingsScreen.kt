@@ -22,7 +22,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -61,7 +61,7 @@ fun SettingsScreen(app: App) {
     var update by remember { mutableStateOf<UpdateCheck.Result?>(null) }
     LaunchedEffect(Unit) { update = UpdateCheck.check(BuildConfig.VERSION_NAME) }
 
-    Scaffold(topBar = { TopAppBar(title = { Text("설정") }) }) { pad ->
+    Scaffold(topBar = { CenterAlignedTopAppBar(title = { Text("설정") }) }) { pad ->
         Column(
             Modifier.fillMaxSize().padding(pad).verticalScroll(rememberScrollState()).padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),

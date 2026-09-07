@@ -27,7 +27,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -49,7 +49,7 @@ fun BrowseScreen(app: App, onOpen: (Connection) -> Unit) {
     var renaming by remember { mutableStateOf<Connection?>(null) }
 
     Scaffold(
-        topBar = { TopAppBar(title = { Text("탐색") }) },
+        topBar = { CenterAlignedTopAppBar(title = { Text("탐색") }) },
         floatingActionButton = {
             ExtendedFloatingActionButton(
                 onClick = { showAdd = true },
