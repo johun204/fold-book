@@ -24,7 +24,6 @@ class PageStream(
     private val cacheDir: File,
     private val scope: CoroutineScope,
     prefetchForward: Int = 5,
-    private val mirror: Boolean = false,   // RTL: 텍스처를 좌우 반전 (뷰도 scaleX=-1 로 되돌림)
 ) {
     private companion object {
         const val BACK = 2
@@ -75,11 +74,37 @@ class PageStream(
         ensureWindow()
     }
 
+    /** 현재 페이지를 최우선으로 받아 디코드하고, 끝난 뒤에야 앞뒤 미리불러오기를 시작한다. */
     private fun ensureWindow() {
+        val cur = current
+        val loadCurNow = synchronized(decoded) {
+            if (cur in pages.indices && pages[cur].entryId.isNotEmpty() &&
+                !decoded.containsKey(cur) && cur !in inflight
+            ) {
+                inflight.add(cur); true
+            } else false
+        }
+        if (!loadCurNow) {
+            prefetchAround(cur)
+            return
+        }
+        scope.launch(Dispatchers.IO) {
+            val bmp = runCatching { load(cur) }.getOrNull()
+            synchronized(decoded) {
+                inflight.remove(cur)
+                if (bmp != null) decoded[cur] = bmp
+            }
+            if (bmp != null) withContext(Dispatchers.Main) { onReady?.invoke(cur) }
+            prefetchAround(current)
+        }
+    }
+
+    /** 창 범위(현재 페이지 제외)를 현재에서 가까운 순으로 받아두고, 창 밖 캐시는 버린다. */
+    private fun prefetchAround(center: Int) {
         val toLoad = ArrayList<Int>()
         synchronized(decoded) {
-            for (i in (current - BACK)..(current + fwd)) {
-                if (i !in pages.indices) continue
+            for (i in (center - BACK)..(center + fwd)) {
+                if (i !in pages.indices || i == center) continue
                 if (pages[i].entryId.isEmpty()) continue   // 빈 페이지는 로딩 대상 아님
                 if (decoded.containsKey(i) || i in inflight) continue
                 inflight.add(i)
@@ -94,6 +119,7 @@ class PageStream(
                 }
             }
         }
+        toLoad.sortBy { kotlin.math.abs(it - center) }
         for (i in toLoad) {
             scope.launch(Dispatchers.IO) {
                 val bmp = runCatching { load(i) }.getOrNull()
@@ -144,7 +170,6 @@ class PageStream(
         val out = Bitmap.createBitmap(pw, ph, Bitmap.Config.ARGB_8888)
         Canvas(out).apply {
             drawColor(Color.rgb(20, 20, 20))
-            if (mirror) scale(-1f, 1f, pw / 2f, ph / 2f)  // 뷰 scaleX=-1 과 상쇄되어 내용은 정방향
             val s = minOf(pw.toFloat() / bmp.width, ph.toFloat() / bmp.height)
             val dw = bmp.width * s
             val dh = bmp.height * s

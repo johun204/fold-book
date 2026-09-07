@@ -43,6 +43,7 @@ data class Session(
     val pageCount: Int = 0,             // 전체 리더 페이지 수(0 = 미확정)
     val updatedAt: Long = 0L,
     val finished: Boolean = false,      // 폴더 끝까지 다 봄 → 홈의 '완료' 그룹
+    val directionOverride: ReadingDirection? = null,  // 이 책(폴더)만의 읽기 방향. null = 설정의 기본값
 )
 
 /** 폴더 탐색 항목. */

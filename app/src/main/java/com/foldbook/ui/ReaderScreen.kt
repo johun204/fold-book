@@ -179,11 +179,11 @@ private fun ViewerSettingsSheet(
             Opt("항상 한 페이지씩", spread == SpreadMode.SINGLE) { onSpread(SpreadMode.SINGLE) }
             Opt("항상 양쪽 페이지", spread == SpreadMode.DOUBLE) { onSpread(SpreadMode.DOUBLE) }
             HorizontalDivider(Modifier.padding(vertical = 6.dp))
-            Cap("읽기 방향")
+            Cap("읽기 방향 (이 책)")
             Opt("오른쪽 → 왼쪽 (일본 만화)", dir == ReadingDirection.RTL) { onDir(ReadingDirection.RTL) }
             Opt("왼쪽 → 오른쪽 (서양 만화·웹툰)", dir == ReadingDirection.LTR) { onDir(ReadingDirection.LTR) }
             Text(
-                "변경하면 현재 페이지에서 다시 불러옵니다.",
+                "이 책에만 적용됩니다. 기본값은 설정 탭에서 바꿉니다. 변경하면 현재 페이지에서 다시 불러옵니다.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

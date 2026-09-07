@@ -64,8 +64,9 @@ fun SettingsScreen(app: App) {
             Modifier.fillMaxSize().padding(pad).verticalScroll(rememberScrollState()).padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            Section("읽기 방향")
-            Desc("만화를 넘기는 방향입니다. 일본 만화(세로쓰기)는 보통 오른쪽에서 왼쪽으로 읽습니다.")
+            Section("읽기 방향 (기본값)")
+            Desc("새로 여는 책에 적용되는 기본 넘김 방향입니다. 일본 만화는 보통 오른쪽에서 왼쪽으로 읽습니다. " +
+                "책마다 뷰어의 '뷰어 설정'에서 따로 바꿀 수 있습니다.")
             RadioRow("오른쪽 → 왼쪽 (일본 만화)", dir == ReadingDirection.RTL) {
                 dir = ReadingDirection.RTL; prefs.direction = dir
             }

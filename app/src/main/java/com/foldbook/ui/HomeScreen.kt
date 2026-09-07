@@ -57,6 +57,7 @@ fun HomeScreen(app: App) {
     val done = sessions.filter { it.finished }
 
     var pendingDelete by remember { mutableStateOf<String?>(null) }
+    var actionFor by remember { mutableStateOf<Session?>(null) }
     var confirmClearDone by remember { mutableStateOf(false) }
 
     Scaffold(topBar = { TopAppBar(title = { Text("홈") }) }) { pad ->
@@ -88,7 +89,7 @@ fun HomeScreen(app: App) {
                 SessionCard(
                     s = s,
                     onOpen = { open(ctx, s) },
-                    onLongPress = { pendingDelete = s.id },
+                    onLongPress = { actionFor = s },
                 )
             }
 
@@ -123,6 +124,28 @@ fun HomeScreen(app: App) {
             icon = { Icon(Icons.Filled.Delete, null) },
             title = { Text("이 항목 삭제") },
             text = { Text("목록에서 지우고 받아둔 캐시도 정리합니다.") },
+        )
+    }
+
+    actionFor?.let { s ->
+        AlertDialog(
+            onDismissRequest = { actionFor = null },
+            confirmButton = {
+                TextButton(onClick = {
+                    // 완료 목록으로 이동 + 받아둔 미리불러오기 캐시 정리
+                    app.sessions.upsert(s.copy(finished = true))
+                    SessionCache.clear(ctx, s.id)
+                    actionFor = null
+                }) { Text("완료 목록으로 이동") }
+            },
+            dismissButton = {
+                Row {
+                    TextButton(onClick = { pendingDelete = s.id; actionFor = null }) { Text("삭제") }
+                    TextButton(onClick = { actionFor = null }) { Text("취소") }
+                }
+            },
+            title = { Text(s.folderName.ifBlank { "이 항목" }) },
+            text = { Text("완료 목록으로 옮기거나 목록에서 삭제합니다.") },
         )
     }
 

@@ -17,15 +17,16 @@ import javax.microedition.khronos.opengles.GL10
 /**
  * 종이책 3D 페이지 넘김 뷰. 드래그하는 손가락 위치를 따라 페이지가 말린다 (eschao PageFlip).
  * doublePage=true 면 가로 화면에서 좌우 두 페이지를 함께 보여준다 (세로에서는 자동으로 한 장).
- * rtl=true(일본 만화) 면 뷰를 좌우 반전해 '왼쪽→오른쪽' 드래그로 다음 페이지가 넘어가게 한다
- * (텍스처는 PageStream 에서 미리 반전해 상쇄).
+ * rtl=true(일본 만화) 면 넘김 방향만 뒤집어 '왼쪽→오른쪽' 드래그로 다음 페이지(다음 이미지)가 넘어가게 한다.
+ * (이미지 내용은 그대로. 스프레드 스캔본은 SpreadPolicy 에서 오른쪽 절반부터 순서를 잡는다.)
+ * ponytail: 좌표만 반전 → 컬 애니메이션은 LTR 기준(반대쪽에서 말림). 완전한 RTL 컬은 PageFlip 엔진 포크 필요.
  */
 class PageFlipView(
     context: Context,
     private val provider: PageImageProvider,
     startPage: Int,
     doublePage: Boolean,
-    rtl: Boolean = false,
+    private val rtl: Boolean = false,
     private val duration: Int = 900,
 ) : GLSurfaceView(context), GLSurfaceView.Renderer {
 
@@ -49,11 +50,15 @@ class PageFlipView(
     private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
     private var downX = 0f
     private var downY = 0f
+    private var downRawX = 0f
+    private var downRawY = 0f
     private var downT = 0L
     private var dragging = false
 
+    /** RTL 이면 넘김 엔진에 넣는 x 를 좌우로 뒤집어, 왼→오 드래그가 '다음 페이지'가 되게 한다. */
+    private fun ex(x: Float) = if (rtl) width - x else x
+
     init {
-        if (rtl) scaleX = -1f
         pageFlip.setSemiPerimeterRatio(0.8f)
             .setShadowWidthOfFoldEdges(5f, 60f, 0.3f)
             .setShadowWidthOfFoldBase(5f, 80f, 0.4f)
@@ -94,21 +99,22 @@ class PageFlipView(
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(e: MotionEvent): Boolean {
-        val x = e.x
+        val x = ex(e.x)   // 넘김 엔진 좌표 (RTL 이면 좌우 반전)
         val y = e.y
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
-                downX = x; downY = y; downT = SystemClock.uptimeMillis(); dragging = false
+                downX = x; downY = y; downRawX = e.x; downRawY = e.y
+                downT = SystemClock.uptimeMillis(); dragging = false
                 fingerDown(x, y)
             }
             MotionEvent.ACTION_MOVE -> {
-                if (!dragging && (kotlin.math.hypot(x - downX, y - downY) > touchSlop)) dragging = true
+                if (!dragging && (kotlin.math.hypot(e.x - downRawX, e.y - downRawY) > touchSlop)) dragging = true
                 if (dragging) fingerMove(x, y)
             }
             MotionEvent.ACTION_UP -> {
                 val isTap = !dragging &&
                     SystemClock.uptimeMillis() - downT < 220 &&
-                    kotlin.math.hypot(x - downX, y - downY) <= touchSlop
+                    kotlin.math.hypot(e.x - downRawX, e.y - downRawY) <= touchSlop
                 pageFlip.onFingerUp(
                     x.coerceIn(0f, width.toFloat()), y.coerceIn(0f, height.toFloat()), duration,
                 )

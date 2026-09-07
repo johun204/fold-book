@@ -56,6 +56,7 @@ class ReaderActivity : ComponentActivity() {
     private var totalPages by mutableIntStateOf(0)
     private var title by mutableStateOf("")
     private var rtl by mutableStateOf(false)
+    private var curDirection by mutableStateOf(ReadingDirection.RTL)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -77,9 +78,17 @@ class ReaderActivity : ComponentActivity() {
                     onBack = { finish() },
                     onJump = { n -> flip?.goTo(n) },
                     spreadMode = Prefs(this).spreadMode,
-                    direction = Prefs(this).direction,
+                    direction = curDirection,
                     onChangeSpread = { m -> Prefs(this).spreadMode = m; recreate() },
-                    onChangeDirection = { d -> Prefs(this).direction = d; recreate() },
+                    onChangeDirection = { d ->
+                        // 이 책(폴더)만의 방향으로 저장 — 설정 탭의 기본값은 건드리지 않는다.
+                        session?.let {
+                            val ns = it.copy(directionOverride = d)
+                            app.sessions.upsert(ns)
+                            session = ns
+                        }
+                        recreate()
+                    },
                 )
             }
         }
@@ -136,8 +145,13 @@ class ReaderActivity : ComponentActivity() {
         }
         if (images.isEmpty()) { toast(getString(R.string.err_empty)); finish(); return }
 
+        var s = sessionId?.let { app.sessions.get(it) }
+            ?: app.sessions.findOrCreate(conn, fId, fName)
+        if (s.finished) s = s.copy(finished = false, pageIndex = 0)   // 완료 세션 다시 열면 처음부터
+
         val prefs = Prefs(this)
-        val readingRtl = prefs.direction == ReadingDirection.RTL
+        val dir = s.directionOverride ?: prefs.direction   // 이 책만의 방향이 있으면 우선
+        val readingRtl = dir == ReadingDirection.RTL
         val wide = isWideScreen()
         val autoPage = prefs.doublePage(wide)
         val doubleMode = autoPage &&
@@ -146,16 +160,12 @@ class ReaderActivity : ComponentActivity() {
         val analyze = prefs.splitWideScans &&
             (conn.type == ConnType.LOCAL || prefs.analyzeRemote)
         val dimsMap = if (analyze) scanSizes(images) else emptyMap()
-        val pages = SpreadPolicy.expand(images, prefs.direction, doubleMode, prefs.splitWideScans) { id -> dimsMap[id] }
+        val pages = SpreadPolicy.expand(images, dir, doubleMode, prefs.splitWideScans) { id -> dimsMap[id] }
 
         val startEntryIdx =
             if (startEntryId != null) images.indexOfFirst { it.id == startEntryId }.coerceAtLeast(0) else 0
         val startEntry = images[startEntryIdx].id
         val startPageIdx = pages.indexOfFirst { it.entryId == startEntry }.coerceAtLeast(0)
-
-        var s = sessionId?.let { app.sessions.get(it) }
-            ?: app.sessions.findOrCreate(conn, fId, fName)
-        if (s.finished) s = s.copy(finished = false, pageIndex = 0)   // 완료 세션 다시 열면 처음부터
 
         var startPage = when {
             restoredPage in 1..pages.size -> restoredPage
@@ -176,7 +186,7 @@ class ReaderActivity : ComponentActivity() {
         session = s
 
         val cacheDir = SessionCache.dir(this, s.id)
-        stream = PageStream(backend, pages, cacheDir, lifecycleScope, prefs.prefetchForward, mirror = readingRtl)
+        stream = PageStream(backend, pages, cacheDir, lifecycleScope, prefs.prefetchForward)
         val provider = PageImageProvider(stream)
 
         val v = PageFlipView(this, provider, startPage, autoPage, rtl = readingRtl)
@@ -186,6 +196,7 @@ class ReaderActivity : ComponentActivity() {
         flip = v
 
         rtl = readingRtl
+        curDirection = dir
         title = fName.ifBlank { s.folderName }
         totalPages = pages.size
         pageNum = startPage
@@ -235,22 +246,31 @@ class ReaderActivity : ComponentActivity() {
             val cur = session
             if (cur == null) { finish(); return@launch }
 
+            // 다음 '권'은 같은 바로 위 부모 폴더 안의, 이미지가 실제로 들어 있는 다음 폴더만 인정한다.
+            // (예: 원피스/1권 → 원피스/2권 O,  원피스 → 나루토 X)
             val next = try {
                 val sibs = backend.siblingFolders(folderId)
                 val idx = sibs.indexOfFirst { it.id == folderId }
-                if (idx >= 0) sibs.getOrNull(idx + 1) else null
+                if (idx < 0) null
+                else sibs.drop(idx + 1).firstOrNull { sib ->
+                    runCatching { backend.list(sib.id).any { !it.isDir } }.getOrDefault(false)
+                }
             } catch (e: Exception) {
                 null
             }
 
-            // 현재 세션 = 완료 처리 (홈의 '완료' 그룹으로), 받아둔 캐시는 정리
+            if (next == null) {
+                // 마지막 권 — 알림만 보이고 폴더 이동/종료는 하지 않는다.
+                toast(getString(R.string.last_folder))
+                rolling = false
+                return@launch
+            }
+
+            // 현재 세션 = 완료 처리 (홈의 '완료' 그룹으로), 받아둔 미리불러오기 캐시는 정리
             app.sessions.upsert(cur.copy(finished = true, pageIndex = (cur.pageCount - 1).coerceAtLeast(0)))
             if (::stream.isInitialized) stream.close()
             SessionCache.clear(this@ReaderActivity, cur.id)
 
-            if (next == null) {
-                toast(getString(R.string.last_folder)); finish(); return@launch
-            }
             val ns = app.sessions.findOrCreate(conn, next.id, next.name)
             startActivity(
                 Intent(this@ReaderActivity, ReaderActivity::class.java)
