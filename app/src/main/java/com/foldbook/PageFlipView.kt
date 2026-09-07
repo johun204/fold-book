@@ -17,9 +17,10 @@ import javax.microedition.khronos.opengles.GL10
 /**
  * 종이책 3D 페이지 넘김 뷰. 드래그하는 손가락 위치를 따라 페이지가 말린다 (eschao PageFlip).
  * doublePage=true 면 가로 화면에서 좌우 두 페이지를 함께 보여준다 (세로에서는 자동으로 한 장).
- * rtl=true(일본 만화) 면 넘김 방향만 뒤집어 '왼쪽→오른쪽' 드래그로 다음 페이지(다음 이미지)가 넘어가게 한다.
- * (이미지 내용은 그대로. 스프레드 스캔본은 SpreadPolicy 에서 오른쪽 절반부터 순서를 잡는다.)
- * ponytail: 좌표만 반전 → 컬 애니메이션은 LTR 기준(반대쪽에서 말림). 완전한 RTL 컬은 PageFlip 엔진 포크 필요.
+ * rtl=true(일본 만화) 면 뷰 전체를 좌우로 뒤집는다(scaleX=-1):
+ *  - 프레임워크가 터치 좌표도 같이 뒤집어 주므로 '왼쪽→오른쪽' 드래그 = 다음 페이지, 컬도 손가락을 따라간다.
+ *  - 뒤집힌 화면에서 글자가 정방향으로 보이도록 PageStream(mirror=true) 이 텍스처를 미리 좌우 반전한다.
+ *    (원본 파일은 건드리지 않음 — 그리는 순간에만 반전)
  */
 class PageFlipView(
     context: Context,
@@ -50,15 +51,11 @@ class PageFlipView(
     private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
     private var downX = 0f
     private var downY = 0f
-    private var downRawX = 0f
-    private var downRawY = 0f
     private var downT = 0L
     private var dragging = false
 
-    /** RTL 이면 넘김 엔진에 넣는 x 를 좌우로 뒤집어, 왼→오 드래그가 '다음 페이지'가 되게 한다. */
-    private fun ex(x: Float) = if (rtl) width - x else x
-
     init {
+        if (rtl) scaleX = -1f
         pageFlip.setSemiPerimeterRatio(0.8f)
             .setShadowWidthOfFoldEdges(5f, 60f, 0.3f)
             .setShadowWidthOfFoldBase(5f, 80f, 0.4f)
@@ -99,22 +96,22 @@ class PageFlipView(
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(e: MotionEvent): Boolean {
-        val x = ex(e.x)   // 넘김 엔진 좌표 (RTL 이면 좌우 반전)
+        val x = e.x   // rtl 이면 프레임워크가 scaleX=-1 의 역변환을 적용한 좌표가 들어온다
         val y = e.y
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
-                downX = x; downY = y; downRawX = e.x; downRawY = e.y
+                downX = x; downY = y
                 downT = SystemClock.uptimeMillis(); dragging = false
                 fingerDown(x, y)
             }
             MotionEvent.ACTION_MOVE -> {
-                if (!dragging && (kotlin.math.hypot(e.x - downRawX, e.y - downRawY) > touchSlop)) dragging = true
+                if (!dragging && (kotlin.math.hypot(x - downX, y - downY) > touchSlop)) dragging = true
                 if (dragging) fingerMove(x, y)
             }
             MotionEvent.ACTION_UP -> {
                 val isTap = !dragging &&
                     SystemClock.uptimeMillis() - downT < 220 &&
-                    kotlin.math.hypot(e.x - downRawX, e.y - downRawY) <= touchSlop
+                    kotlin.math.hypot(x - downX, y - downY) <= touchSlop
                 pageFlip.onFingerUp(
                     x.coerceIn(0f, width.toFloat()), y.coerceIn(0f, height.toFloat()), duration,
                 )
@@ -160,11 +157,9 @@ class PageFlipView(
     private fun fingerMove(x: Float, y: Float) {
         if (pageFlip.isAnimating) return
         // 손가락을 뗄 때(fingerUp)까지는 자동으로 넘기지 않는다.
-        // 드래그 이동량을 폭의 72% 로 제한 → eschao 가 반대편 절반을 넘어가도 곡선을 계속 갱신(멈춤 방지).
-        val maxX = width * 0.72f
-        val maxY = height * 0.72f
-        val cx = x.coerceIn(downX - maxX, downX + maxX).coerceIn(0f, width.toFloat())
-        val cy = y.coerceIn(downY - maxY, downY + maxY).coerceIn(0f, height.toFloat())
+        // 폭 제한 없이 화면 끝까지 드래그해도 곡선이 이어진다 (PageFlip.java 가 과도 드래그를 가장자리에 고정).
+        val cx = x.coerceIn(0f, width.toFloat())
+        val cy = y.coerceIn(0f, height.toFloat())
         if (pageFlip.onFingerMove(cx, cy)) {
             lock.lock()
             try {
@@ -191,6 +186,9 @@ class PageFlipView(
         lock.lock()
         try {
             render.onDrawFrame()
+        } catch (e: Exception) {
+            // 폴드/펼침으로 표면이 재구성되는 순간의 일시적 상태(텍스처·페이지 미준비 등)로 죽지 않도록.
+            Log.e("PageFlipView", "onDrawFrame failed", e)
         } finally {
             lock.unlock()
         }
@@ -199,25 +197,54 @@ class PageFlipView(
     override fun onSurfaceChanged(gl: GL10?, width: Int, height: Int) {
         try {
             pageFlip.onSurfaceChanged(width, height)
-            lock.lock()
-            try {
-                val wantDouble = pageFlip.secondPage != null
-                if (wantDouble && render !is PageRender.Double) {
-                    val n = render.pageNo
-                    render.release()
-                    render = makeRender(PageRender.Double::class.java, n)
-                } else if (!wantDouble && render !is PageRender.Single) {
-                    val n = render.pageNo
-                    render.release()
-                    render = makeRender(PageRender.Single::class.java, n)
-                }
-                render.onSurfaceChanged()
-                provider.stream.focus(render.pageNo - 1)
-            } finally {
-                lock.unlock()
-            }
+            applySurface()
         } catch (e: Exception) {
             Log.e("PageFlipView", "onSurfaceChanged failed", e)
+        }
+    }
+
+    /** 표면 크기가 바뀐 뒤 렌더러(단면/양면)를 맞추고 페이지 크기를 다시 잡는다. lock 안에서 실행. */
+    private fun applySurface() {
+        lock.lock()
+        try {
+            val wantDouble = pageFlip.secondPage != null
+            if (wantDouble && render !is PageRender.Double) {
+                val n = render.pageNo
+                render.release()
+                render = makeRender(PageRender.Double::class.java, n)
+            } else if (!wantDouble && render !is PageRender.Single) {
+                val n = render.pageNo
+                render.release()
+                render = makeRender(PageRender.Single::class.java, n)
+            }
+            render.onSurfaceChanged()
+            provider.stream.focus(render.pageNo - 1)
+        } finally {
+            lock.unlock()
+        }
+    }
+
+    /**
+     * 폴드/펼침 등으로 화면 크기·형태가 바뀌었을 때 (Activity 재생성 없이) 양면 여부를 다시 판단한다.
+     * 표면 크기 자체는 GLSurfaceView 가 onSurfaceChanged 를 다시 불러 반영한다.
+     */
+    fun onConfigChanged(wantAutoPage: Boolean) {
+        queueEvent {
+            try {
+                lock.lock()
+                try {
+                    pageFlip.enableAutoPage(wantAutoPage)
+                    if (width > 0 && height > 0) {
+                        pageFlip.onSurfaceChanged(width, height)
+                    }
+                } finally {
+                    lock.unlock()
+                }
+                applySurface()
+            } catch (e: Exception) {
+                Log.e("PageFlipView", "onConfigChanged failed", e)
+            }
+            requestRender()
         }
     }
 

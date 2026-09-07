@@ -728,12 +728,17 @@ public class PageFlip {
             float xFoldX1 = xRatio * xTouchX;
             if (Math.abs(xFoldX1) + 2 >= page.width) {
                 float dy2 = ((diagonalP.x - originP.x) / xRatio - dx) * dx;
-                // ignore current moving if we can't get a valid dy, for example
-                // , in double pages mode, when finger is moving from the one
-                // page to another page, the dy2 is negative and should be
-                // ignored
+                // dy2 < 0 means the finger has been dragged past the far edge.
+                // Double pages: it also happens when the finger crosses to the
+                // other page, so keep ignoring the move there.
+                // Single page: don't freeze - pin the fold at the edge and keep
+                // curling so the effect works all the way across the screen.
                 if (dy2 < 0) {
-                    return false;
+                    if (mPages[SECOND_PAGE] != null) {
+                        return false;
+                    }
+                    dx = (diagonalP.x - originP.x) / xRatio;
+                    dy2 = 0;
                 }
 
                 double t = Math.sqrt(dy2);

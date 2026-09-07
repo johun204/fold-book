@@ -24,6 +24,7 @@ class PageStream(
     private val cacheDir: File,
     private val scope: CoroutineScope,
     prefetchForward: Int = 5,
+    private val mirror: Boolean = false,   // RTL: 텍스처를 그리는 순간에만 좌우 반전 (뷰 scaleX=-1 과 상쇄 → 글자 정방향)
 ) {
     private companion object {
         const val BACK = 2
@@ -170,6 +171,7 @@ class PageStream(
         val out = Bitmap.createBitmap(pw, ph, Bitmap.Config.ARGB_8888)
         Canvas(out).apply {
             drawColor(Color.rgb(20, 20, 20))
+            if (mirror) scale(-1f, 1f, pw / 2f, ph / 2f)  // 뷰 scaleX=-1 과 상쇄되어 내용은 정방향
             val s = minOf(pw.toFloat() / bmp.width, ph.toFloat() / bmp.height)
             val dw = bmp.width * s
             val dh = bmp.height * s

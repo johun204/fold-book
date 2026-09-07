@@ -26,8 +26,8 @@ object SpreadPolicy {
      * 이미지 목록을 리더 페이지 목록으로 확장한다.
      * - 좌우 양면 스캔본(가로가 긴 이미지)은 화면·기기와 무관하게 **항상** 두 장으로 나눈다
      *   (페이지 인덱스가 일정 → 이어보기 안정, 양면 모드에선 두 절반이 두 슬롯을 채워 스프레드로 보임).
-     * - 한 장씩 보기(single)에서 RTL 은 오른쪽 절반을 먼저 본다. 양면 보기(double)에선 두 절반이 원본
-     *   이미지처럼 좌/우 슬롯에 그대로 놓여야 하므로 항상 (왼쪽,오른쪽) 순서. 넘김 방향은 뷰에서 처리.
+     * - 절반 순서는 읽기 방향을 따른다(RTL=오른쪽 먼저). 뷰가 RTL 에서 좌우 반전(scaleX=-1)되므로
+     *   이 순서 그대로가 화면에 맞다 (single·double 동일).
      * - 양면 모드에선 스프레드가 (홀,짝) 페어에 통째로 들어가도록 필요하면 앞에 빈 페이지를 끼운다.
      * - dims 가 null(원격 등 크기 미상)이면 스프레드 판정 불가 → 통짜.
      */
@@ -39,7 +39,7 @@ object SpreadPolicy {
         dims: (entryId: String) -> Pair<Int, Int>?,
     ): List<PageRef> {
         val out = ArrayList<PageRef>(images.size)
-        val halves = if (dir == ReadingDirection.RTL && !doubleMode) listOf(Half.RIGHT, Half.LEFT)
+        val halves = if (dir == ReadingDirection.RTL) listOf(Half.RIGHT, Half.LEFT)
         else listOf(Half.LEFT, Half.RIGHT)
         for (e in images) {
             val d = if (split) dims(e.id) else null

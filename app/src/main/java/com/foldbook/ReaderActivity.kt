@@ -7,6 +7,9 @@ import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -50,6 +53,11 @@ class ReaderActivity : ComponentActivity() {
     private var saveJob: Job? = null
     private var restoredPage = 0
 
+    private sealed interface BoundaryPrompt {
+        data class PrevVolume(val folder: Entry) : BoundaryPrompt
+        data object NoPrev : BoundaryPrompt
+    }
+
     // Compose 상태
     private var ready by mutableStateOf(false)
     private var pageNum by mutableIntStateOf(1)
@@ -57,6 +65,7 @@ class ReaderActivity : ComponentActivity() {
     private var title by mutableStateOf("")
     private var rtl by mutableStateOf(false)
     private var curDirection by mutableStateOf(ReadingDirection.RTL)
+    private var boundaryPrompt by mutableStateOf<BoundaryPrompt?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -90,6 +99,31 @@ class ReaderActivity : ComponentActivity() {
                         recreate()
                     },
                 )
+                when (val bp = boundaryPrompt) {
+                    is BoundaryPrompt.PrevVolume -> AlertDialog(
+                        onDismissRequest = { boundaryPrompt = null },
+                        confirmButton = {
+                            TextButton(onClick = {
+                                boundaryPrompt = null
+                                openFolder(bp.folder, atEnd = true)
+                            }) { Text("이전 권 보기") }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { boundaryPrompt = null }) { Text("취소") }
+                        },
+                        title = { Text("첫 페이지입니다") },
+                        text = { Text("이전 권으로 이동할까요?") },
+                    )
+                    BoundaryPrompt.NoPrev -> AlertDialog(
+                        onDismissRequest = { boundaryPrompt = null },
+                        confirmButton = {
+                            TextButton(onClick = { boundaryPrompt = null }) { Text("확인") }
+                        },
+                        title = { Text("첫 번째 권") },
+                        text = { Text("이 만화의 첫 번째 권이라 이전으로 이동할 수 없습니다.") },
+                    )
+                    null -> {}
+                }
             }
         }
 
@@ -107,6 +141,15 @@ class ReaderActivity : ComponentActivity() {
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         flip?.let { outState.putInt(SAVED_PAGE, it.currentPageNumber()) }
+    }
+
+    /** 폴드/펼침·회전으로 화면이 바뀌어도 Activity 를 재생성하지 않고(manifest configChanges) 그 자리에서 대응. */
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        immersive()
+        val wide = newConfig.orientation == Configuration.ORIENTATION_LANDSCAPE ||
+            newConfig.smallestScreenWidthDp >= 600
+        flip?.onConfigChanged(Prefs(this).doublePage(wide))
     }
 
     private data class Args(
@@ -167,14 +210,18 @@ class ReaderActivity : ComponentActivity() {
         val startEntry = images[startEntryIdx].id
         val startPageIdx = pages.indexOfFirst { it.entryId == startEntry }.coerceAtLeast(0)
 
+        val startAtEnd = intent.getBooleanExtra(EXTRA_START_AT_END, false)
         var startPage = when {
             restoredPage in 1..pages.size -> restoredPage
             startEntryId != null -> startPageIdx + 1
+            s.pageIndex in pages.indices && s.pageIndex > 0 -> s.pageIndex + 1  // 실제 진행 이력 우선
+            startAtEnd -> pages.size                                            // 이전 권을 끝에서 열기
             s.pageIndex in pages.indices -> s.pageIndex + 1
             else -> 1
         }
         if (doubleMode && startPage % 2 == 0) startPage = (startPage - 1).coerceAtLeast(1)
         intent.removeExtra(EXTRA_START_ENTRY_ID)
+        intent.removeExtra(EXTRA_START_AT_END)
 
         s = s.copy(
             pageCount = pages.size,
@@ -186,7 +233,7 @@ class ReaderActivity : ComponentActivity() {
         session = s
 
         val cacheDir = SessionCache.dir(this, s.id)
-        stream = PageStream(backend, pages, cacheDir, lifecycleScope, prefs.prefetchForward)
+        stream = PageStream(backend, pages, cacheDir, lifecycleScope, prefs.prefetchForward, mirror = readingRtl)
         val provider = PageImageProvider(stream)
 
         val v = PageFlipView(this, provider, startPage, autoPage, rtl = readingRtl)
@@ -237,50 +284,62 @@ class ReaderActivity : ComponentActivity() {
     }
 
     private fun onBoundary(forward: Boolean) {
-        if (!forward) {
-            toast(getString(R.string.first_page)); return
-        }
         if (rolling) return
         rolling = true
         lifecycleScope.launch {
-            val cur = session
-            if (cur == null) { finish(); return@launch }
+            try {
+                val cur = session ?: run { finish(); return@launch }
+                val target = runCatching { adjacentFolder(forward) }.getOrNull()
 
-            // 다음 '권'은 같은 바로 위 부모 폴더 안의, 이미지가 실제로 들어 있는 다음 폴더만 인정한다.
-            // (예: 원피스/1권 → 원피스/2권 O,  원피스 → 나루토 X)
-            val next = try {
-                val sibs = backend.siblingFolders(folderId)
-                val idx = sibs.indexOfFirst { it.id == folderId }
-                if (idx < 0) null
-                else sibs.drop(idx + 1).firstOrNull { sib ->
-                    runCatching { backend.list(sib.id).any { !it.isDir } }.getOrDefault(false)
+                if (!forward) {
+                    // 첫 페이지에서 뒤로 → 이전 권으로 갈지 묻거나, 첫 권이면 못 간다고 알림
+                    boundaryPrompt = if (target != null) BoundaryPrompt.PrevVolume(target)
+                    else BoundaryPrompt.NoPrev
+                    return@launch
                 }
-            } catch (e: Exception) {
-                null
-            }
 
-            if (next == null) {
-                // 마지막 권 — 알림만 보이고 폴더 이동/종료는 하지 않는다.
-                toast(getString(R.string.last_folder))
+                if (target == null) {
+                    // 마지막 권 — 알림만, 폴더 이동/종료는 하지 않는다.
+                    toast(getString(R.string.last_folder))
+                    return@launch
+                }
+                // 현재 세션 = 완료 처리, 받아둔 미리불러오기 캐시는 정리하고 다음 권으로
+                app.sessions.upsert(cur.copy(finished = true, pageIndex = (cur.pageCount - 1).coerceAtLeast(0)))
+                if (::stream.isInitialized) stream.close()
+                SessionCache.clear(this@ReaderActivity, cur.id)
+                openFolder(target, atEnd = false)
+            } finally {
                 rolling = false
-                return@launch
             }
-
-            // 현재 세션 = 완료 처리 (홈의 '완료' 그룹으로), 받아둔 미리불러오기 캐시는 정리
-            app.sessions.upsert(cur.copy(finished = true, pageIndex = (cur.pageCount - 1).coerceAtLeast(0)))
-            if (::stream.isInitialized) stream.close()
-            SessionCache.clear(this@ReaderActivity, cur.id)
-
-            val ns = app.sessions.findOrCreate(conn, next.id, next.name)
-            startActivity(
-                Intent(this@ReaderActivity, ReaderActivity::class.java)
-                    .putExtra(EXTRA_CONNECTION_ID, conn.id)
-                    .putExtra(EXTRA_FOLDER_ID, next.id)
-                    .putExtra(EXTRA_FOLDER_NAME, next.name)
-                    .putExtra(EXTRA_SESSION_ID, ns.id)
-            )
-            finish()
         }
+    }
+
+    /**
+     * 같은 바로 위 부모 폴더 안에서 현재 폴더의 앞/뒤로, 이미지가 실제로 들어 있는 첫 폴더.
+     * (예: 원피스/1권 ↔ 원피스/2권 O,  원피스 → 나루토 X — siblingFolders 가 부모 한정)
+     */
+    private suspend fun adjacentFolder(forward: Boolean): Entry? {
+        val sibs = backend.siblingFolders(folderId)
+        val idx = sibs.indexOfFirst { it.id == folderId }
+        if (idx < 0) return null
+        val order = if (forward) (idx + 1)..sibs.lastIndex else (idx - 1) downTo 0
+        for (i in order) {
+            val f = sibs[i]
+            if (runCatching { backend.list(f.id).any { !it.isDir } }.getOrDefault(false)) return f
+        }
+        return null
+    }
+
+    private fun openFolder(folder: Entry, atEnd: Boolean) {
+        val ns = app.sessions.findOrCreate(conn, folder.id, folder.name)
+        val i = Intent(this, ReaderActivity::class.java)
+            .putExtra(EXTRA_CONNECTION_ID, conn.id)
+            .putExtra(EXTRA_FOLDER_ID, folder.id)
+            .putExtra(EXTRA_FOLDER_NAME, folder.name)
+            .putExtra(EXTRA_SESSION_ID, ns.id)
+        if (atEnd) i.putExtra(EXTRA_START_AT_END, true)
+        startActivity(i)
+        finish()
     }
 
     override fun onResume() {
@@ -320,6 +379,7 @@ class ReaderActivity : ComponentActivity() {
         const val EXTRA_FOLDER_NAME = "folderName"
         const val EXTRA_START_ENTRY_ID = "startEntry"
         const val EXTRA_SESSION_ID = "session"
+        const val EXTRA_START_AT_END = "startAtEnd"
         private const val SAVED_PAGE = "savedPage"
 
         fun start(

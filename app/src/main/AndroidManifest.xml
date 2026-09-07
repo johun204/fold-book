@@ -34,6 +34,7 @@
         <activity
             android:name=".ReaderActivity"
             android:screenOrientation="fullUser"
+            android:configChanges="screenLayout|screenSize|smallestScreenSize|orientation|keyboard|keyboardHidden|navigation|uiMode|density"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
