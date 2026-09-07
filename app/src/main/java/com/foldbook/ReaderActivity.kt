@@ -152,7 +152,9 @@ class ReaderActivity : ComponentActivity() {
         immersive()
         val wide = newConfig.orientation == Configuration.ORIENTATION_LANDSCAPE ||
             newConfig.smallestScreenWidthDp >= 600
-        flip?.onConfigChanged(wantDouble(Prefs(this), wide, newConfig))
+        val prefs = Prefs(this)
+        flip?.onConfigChanged(wantDouble(prefs, wide, newConfig))
+        flip?.tapZone = if (wide) prefs.tapZoneWide else prefs.tapZoneNarrow
     }
 
     private fun wantDouble(prefs: Prefs, wide: Boolean, cfg: Configuration) =
@@ -280,9 +282,10 @@ class ReaderActivity : ComponentActivity() {
 
         val prefs = Prefs(this)
         val cacheDir = SessionCache.dir(this, s.id)
+        val tapZone = if (isWideScreen()) prefs.tapZoneWide else prefs.tapZoneNarrow
         val src = PageSource(backend, pages, cacheDir, lifecycleScope, prefs.prefetchForward)
         val provider = PageImageProvider(src, rtl = readingRtl)
-        val view = PageFlipView(this, provider, startPage, doubleMode, rtl = readingRtl)
+        val view = PageFlipView(this, provider, startPage, doubleMode, rtl = readingRtl, tapZone = tapZone)
         view.onBoundary = { fwd -> onBoundary(fwd) }
         view.onPageSettled = { n -> pageNum = n; saveProgress(n) }
 

@@ -43,6 +43,15 @@ class Prefs(context: Context) {
         get() = sp.getInt(K_PREFETCH, 5).coerceIn(1, 12)
         set(v) = sp.edit().putInt(K_PREFETCH, v.coerceIn(1, 12)).apply()
 
+    /** 단순 터치로 페이지를 넘기는 좌/우 가장자리 영역 비율(0=끔, 0.05~0.5). 폴드 펼침/접힘 각각 저장. */
+    var tapZoneWide: Float
+        get() = sp.getFloat(K_TAPZONE_WIDE, 0.2f).coerceIn(0f, 0.5f)
+        set(v) = sp.edit().putFloat(K_TAPZONE_WIDE, v.coerceIn(0f, 0.5f)).apply()
+
+    var tapZoneNarrow: Float
+        get() = sp.getFloat(K_TAPZONE_NARROW, 0.3f).coerceIn(0f, 0.5f)
+        set(v) = sp.edit().putFloat(K_TAPZONE_NARROW, v.coerceIn(0f, 0.5f)).apply()
+
     fun doublePage(wide: Boolean) = SpreadPolicy.doublePage(spreadMode, wide)
 
     private companion object {
@@ -53,5 +62,7 @@ class Prefs(context: Context) {
         const val K_SPLIT = "split_wide_scans"
         const val K_ANALYZE_REMOTE = "analyze_remote"
         const val K_REMOTE_THUMBS = "remote_thumbnails"
+        const val K_TAPZONE_WIDE = "tap_zone_wide"
+        const val K_TAPZONE_NARROW = "tap_zone_narrow"
     }
 }

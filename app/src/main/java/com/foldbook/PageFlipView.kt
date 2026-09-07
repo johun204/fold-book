@@ -29,6 +29,8 @@ class PageFlipView(
     startPageReading: Int,
     doublePage: Boolean,
     private val rtl: Boolean = false,
+    /** 단순 터치로 페이지를 넘기는 좌/우 가장자리 영역 비율. 0 이면 터치 넘김 끔(가운데 탭 = 오버레이). */
+    var tapZone: Float = 0f,
     private val duration: Int = 900,
 ) : GLSurfaceView(context), GLSurfaceView.Renderer {
 
@@ -54,6 +56,10 @@ class PageFlipView(
     private var downY = 0f
     private var downT = 0L
     private var dragging = false
+    private var dragRight = false      // 드래그가 오른쪽 방향인가 (첫 유효 이동에서 확정)
+    private var flipActive = false     // eschao 가 실제 컬을 시작했는가
+    private var autoReleased = false   // 화면 절반을 지나 자동으로 손 뗀 처리를 했는가
+    private var synthetic = false      // 합성 제스처(탭 넘김·접힘 제스처) 진행 중
 
     /** 읽기 순번 ↔ 라이브러리 순번 (rtl 이면 역순). 둘 다 1-based. */
     private fun toLib(readingPage: Int): Int =
@@ -66,7 +72,9 @@ class PageFlipView(
             .setShadowWidthOfFoldEdges(5f, 60f, 0.3f)
             .setShadowWidthOfFoldBase(5f, 80f, 0.4f)
             .setPixelsOfMesh(10)
-            .enableAutoPage(doublePage)
+            .enableClickToFlip(false)          // 탭 넘김은 tapZone 으로 직접 처리
+            .setMaskAlphaOfFold(235)           // 단면 모드 접힘 뒷면을 어둡게 → 뒷면에 다음 페이지 내용이 비치지 않도록
+        pageFlip.enableAutoPage(doublePage)    // boolean 반환이라 체인 끝에서 분리 호출
 
         setEGLContextClientVersion(2)
 
@@ -108,27 +116,43 @@ class PageFlipView(
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 downX = x; downY = y
-                downT = SystemClock.uptimeMillis(); dragging = false
+                downT = SystemClock.uptimeMillis()
+                dragging = false; flipActive = false; autoReleased = false
                 fingerDown(x, y)
             }
             MotionEvent.ACTION_MOVE -> {
-                if (!dragging && (kotlin.math.hypot(x - downX, y - downY) > touchSlop)) dragging = true
+                if (!dragging && (kotlin.math.hypot(x - downX, y - downY) > touchSlop)) {
+                    dragging = true
+                    dragRight = x >= downX
+                }
                 if (dragging) fingerMove(x, y)
             }
             MotionEvent.ACTION_UP -> {
                 val isTap = !dragging &&
                     SystemClock.uptimeMillis() - downT < 220 &&
                     kotlin.math.hypot(x - downX, y - downY) <= touchSlop
-                pageFlip.onFingerUp(
-                    x.coerceIn(0f, width.toFloat()), y.coerceIn(0f, height.toFloat()), duration,
-                )
-                lock.lock()
-                try { if (render.onFingerUp()) requestRender() } finally { lock.unlock() }
-                if (isTap) onTap?.invoke()
+                if (!autoReleased) {
+                    pageFlip.onFingerUp(
+                        x.coerceIn(0f, width.toFloat()), y.coerceIn(0f, height.toFloat()), duration,
+                    )
+                    lock.lock()
+                    try { if (render.onFingerUp()) requestRender() } finally { lock.unlock() }
+                }
+                if (isTap) onEdgeTapOrOverlay(x)
             }
-            MotionEvent.ACTION_CANCEL -> fingerUp(x, y)
+            MotionEvent.ACTION_CANCEL -> if (!autoReleased) fingerUp(x, y)
         }
         return true
+    }
+
+    /** 탭이 좌/우 가장자리 영역이면 페이지 넘김, 가운데면 오버레이 토글. */
+    private fun onEdgeTapOrOverlay(x: Float) {
+        val z = tapZone
+        when {
+            z > 0f && x < width * z -> if (rtl) flipForward() else flipBackward()
+            z > 0f && x > width * (1f - z) -> if (rtl) flipBackward() else flipForward()
+            else -> onTap?.invoke()
+        }
     }
 
     /** 스크러버에서 특정 '읽기' 페이지로 점프. */
@@ -145,22 +169,26 @@ class PageFlipView(
         }
     }
 
-    /** 손대지 않고 읽기상 다음 페이지로 (폴더블 접힘 제스처). rtl 이면 왼→오, 아니면 오→왼 스와이프 흉내. */
-    fun flipForward() {
+    /** 손대지 않고 읽기상 다음/이전 페이지로 (폴더블 접힘 제스처·가장자리 탭). */
+    fun flipForward() = synthFlip(fromRightEdge = !rtl)
+    fun flipBackward() = synthFlip(fromRightEdge = rtl)
+
+    /** fromRightEdge=true → 오른쪽에서 왼쪽(eschao forward flip), false → 왼쪽에서 오른쪽(backward flip). */
+    private fun synthFlip(fromRightEdge: Boolean) {
         if (width == 0 || pageFlip.isAnimating) return
         val y = height / 2f
-        if (rtl) {
-            downX = width * 0.08f; downY = y
-            fingerDown(width * 0.08f, y)
-            fingerMove(width * 0.45f, y)
-            fingerMove(width * 0.8f, y)
-            fingerUp(width * 0.94f, y)
-        } else {
-            downX = width * 0.92f; downY = y
-            fingerDown(width * 0.92f, y)
-            fingerMove(width * 0.55f, y)
-            fingerMove(width * 0.2f, y)
-            fingerUp(width * 0.06f, y)
+        val w = width.toFloat()
+        synthetic = true
+        try {
+            if (fromRightEdge) {
+                downX = w * 0.92f; downY = y
+                fingerDown(w * 0.92f, y); fingerMove(w * 0.55f, y); fingerMove(w * 0.2f, y); fingerUp(w * 0.06f, y)
+            } else {
+                downX = w * 0.08f; downY = y
+                fingerDown(w * 0.08f, y); fingerMove(w * 0.45f, y); fingerMove(w * 0.8f, y); fingerUp(w * 0.94f, y)
+            }
+        } finally {
+            synthetic = false
         }
     }
 
@@ -170,15 +198,24 @@ class PageFlipView(
 
     private fun fingerMove(x: Float, y: Float) {
         if (pageFlip.isAnimating) return
-        // 손가락을 뗄 때까지 자동으로 넘기지 않는다. 폭 제한 없이 화면 끝까지 드래그해도 곡선이 이어진다.
+        if (autoReleased && !synthetic) return
         val cx = x.coerceIn(0f, width.toFloat())
         val cy = y.coerceIn(0f, height.toFloat())
         if (pageFlip.onFingerMove(cx, cy)) {
+            if (!synthetic) flipActive = true
             lock.lock()
             try {
                 if (render.onFingerMove()) requestRender()
             } finally {
                 lock.unlock()
+            }
+        }
+        // 실제 드래그가 화면 절반을 지나면 손을 뗀 것과 같게 처리 → 다음/이전 페이지로 확정.
+        if (!synthetic && flipActive && !autoReleased) {
+            val pastHalf = if (dragRight) cx >= width * 0.5f else cx <= width * 0.5f
+            if (pastHalf) {
+                autoReleased = true
+                fingerUp(cx, cy)
             }
         }
     }

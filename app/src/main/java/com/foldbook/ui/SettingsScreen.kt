@@ -55,6 +55,8 @@ fun SettingsScreen(app: App) {
     var analyzeRemote by remember { mutableStateOf(prefs.analyzeRemote) }
     var remoteThumbs by remember { mutableStateOf(prefs.remoteThumbnails) }
     var prefetch by remember { mutableFloatStateOf(prefs.prefetchForward.toFloat()) }
+    var tapWide by remember { mutableFloatStateOf(prefs.tapZoneWide) }
+    var tapNarrow by remember { mutableFloatStateOf(prefs.tapZoneNarrow) }
 
     var update by remember { mutableStateOf<UpdateCheck.Result?>(null) }
     LaunchedEffect(Unit) { update = UpdateCheck.check(BuildConfig.VERSION_NAME) }
@@ -126,6 +128,32 @@ fun SettingsScreen(app: App) {
                 "다음에 볼 페이지를 미리 받아 두는 장수입니다. 값이 클수록 빠르게 넘겨도 회색(로딩) 화면이 " +
                     "덜 뜨지만, 네트워크 데이터와 메모리를 더 사용합니다. 네트워크가 느리면 6~10, " +
                     "데이터가 아까우면 2~3을 권장합니다. 세션이 끝나면 받아둔 파일은 자동으로 정리됩니다.",
+            )
+
+            Divider()
+            Section("터치로 페이지 넘기기")
+            Desc(
+                "화면을 그냥 톡 눌렀을 때 페이지를 넘길 좌·우 가장자리 영역의 너비입니다(0 = 끔, 가운데를 " +
+                    "누르면 항상 메뉴가 뜹니다). 서양 만화는 오른쪽=다음, 일본 만화는 왼쪽=다음입니다. " +
+                    "폴드 펼침(넓은 화면)과 접힘(좁은 화면) 값을 따로 저장합니다.",
+            )
+            Text("펼침(넓은 화면): 화면 폭의 ${(tapWide * 100).roundToInt()}%", style = MaterialTheme.typography.bodyLarge)
+            Slider(
+                value = tapWide,
+                onValueChange = { tapWide = it },
+                onValueChangeFinished = { prefs.tapZoneWide = tapWide },
+                valueRange = 0f..0.5f,
+                steps = 9,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Text("접힘(좁은 화면): 화면 폭의 ${(tapNarrow * 100).roundToInt()}%", style = MaterialTheme.typography.bodyLarge)
+            Slider(
+                value = tapNarrow,
+                onValueChange = { tapNarrow = it },
+                onValueChangeFinished = { prefs.tapZoneNarrow = tapNarrow },
+                valueRange = 0f..0.5f,
+                steps = 9,
+                modifier = Modifier.fillMaxWidth(),
             )
 
             Divider()
