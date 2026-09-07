@@ -12,3 +12,6 @@ testdata/Comics/
 keystore.properties
 keystore/
 scripts/shot-*.png
+
+# 빌드 산출물 APK (릴리즈에 업로드됨)
+*.apk
