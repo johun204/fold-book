@@ -7,8 +7,10 @@ import android.os.Environment
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -67,11 +69,12 @@ import com.foldbook.ConnType
 import com.foldbook.Connection
 import com.foldbook.DownloadService
 import com.foldbook.Entry
+import com.foldbook.NoMedia
 import com.foldbook.ReaderActivity
 import com.foldbook.StorageBackend
 import com.foldbook.backendFor
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun BrowseFolderScreen(
     app: App,
@@ -104,6 +107,14 @@ fun BrowseFolderScreen(
     val selected = remember { mutableStateMapOf<String, Boolean>() }
     val download by DownloadService.state.collectAsStateWithLifecycle()
     val notifPerm = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
+
+    val isLocal = conn.type == ConnType.LOCAL
+    var nomediaTick by remember { mutableIntStateOf(0) }
+    val curNomedia = remember(curId, nomediaTick, isLocal) { isLocal && NoMedia.exists(curId) }
+    val nomediaDirs = remember(entries, nomediaTick, isLocal) {
+        if (isLocal) entries.filter { it.isDir && NoMedia.exists(it.id) }.map { it.id }.toSet() else emptySet()
+    }
+    fun toast(m: String) = android.widget.Toast.makeText(ctx, m, android.widget.Toast.LENGTH_SHORT).show()
 
     val needsPermission = conn.type == ConnType.LOCAL &&
         Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
@@ -147,7 +158,7 @@ fun BrowseFolderScreen(
                             maxLines = 1, overflow = TextOverflow.Ellipsis,
                         )
                         if (!selecting) Text(
-                            fullPath(conn, curId, crumb),
+                            fullPath(conn, curId, crumb) + if (curNomedia) "  ·  갤러리 숨김" else "",
                             style = MaterialTheme.typography.labelSmall,
                             maxLines = 1, overflow = TextOverflow.Ellipsis,
                         )
@@ -189,6 +200,20 @@ fun BrowseFolderScreen(
                                     }
                                 },
                             )
+                            if (isLocal) {
+                                DropdownMenuItem(
+                                    text = { Text(if (curNomedia) "미디어 숨김 해제" else "갤러리에서 숨기기 (.nomedia)") },
+                                    leadingIcon = {
+                                        Icon(if (curNomedia) AppIcons.Visibility else AppIcons.VisibilityOff, null)
+                                    },
+                                    onClick = {
+                                        menu = false
+                                        val h = NoMedia.toggle(ctx, curId)
+                                        nomediaTick++
+                                        toast(if (h) "이 폴더를 갤러리에서 숨겼어요" else "숨김을 해제했어요")
+                                    },
+                                )
+                            }
                             if (conn.type != ConnType.LOCAL) {
                                 DropdownMenuItem(
                                     text = { Text("이 저장소 삭제") },
@@ -242,7 +267,15 @@ fun BrowseFolderScreen(
                             showThumb = showThumbs,
                             selecting = selecting,
                             checked = selected[e.id] == true,
+                            hidden = e.id in nomediaDirs,
                             onCheck = { selected[e.id] = it },
+                            onLongClick = if (isLocal && e.isDir && !selecting) {
+                                {
+                                    val h = NoMedia.toggle(ctx, e.id)
+                                    nomediaTick++
+                                    toast(if (h) "${e.name} · 갤러리에서 숨김" else "${e.name} · 숨김 해제")
+                                }
+                            } else null,
                             onClick = {
                                 when {
                                     selecting -> selected[e.id] = !(selected[e.id] ?: false)
@@ -264,6 +297,7 @@ fun BrowseFolderScreen(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun EntryRow(
     entry: Entry,
@@ -272,7 +306,9 @@ private fun EntryRow(
     showThumb: Boolean,
     selecting: Boolean,
     checked: Boolean,
+    hidden: Boolean = false,
     onCheck: (Boolean) -> Unit,
+    onLongClick: (() -> Unit)? = null,
     onClick: () -> Unit,
 ) {
     val thumb by produceState<android.graphics.Bitmap?>(
@@ -284,8 +320,17 @@ private fun EntryRow(
         }
     }
 
+    val clickMod = if (onLongClick != null) {
+        Modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick)
+    } else {
+        Modifier.clickable(onClick = onClick)
+    }
+
     ListItem(
         headlineContent = { Text(entry.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+        supportingContent = if (hidden) {
+            { Text("갤러리에서 숨김 (.nomedia)", style = MaterialTheme.typography.labelSmall) }
+        } else null,
         leadingContent = {
             if (selecting) {
                 Checkbox(checked = checked, onCheckedChange = onCheck)
@@ -304,7 +349,15 @@ private fun EntryRow(
                 }
             }
         },
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
+        trailingContent = if (hidden) {
+            {
+                Icon(
+                    AppIcons.VisibilityOff, "갤러리에서 숨김",
+                    Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        } else null,
+        modifier = Modifier.fillMaxWidth().then(clickMod),
     )
 }
 
