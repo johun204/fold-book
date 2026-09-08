@@ -2,37 +2,19 @@
     android:width="108dp" android:height="108dp"
     android:viewportWidth="108" android:viewportHeight="108">
 
-    <!-- 펼친 폴더블 본체 -->
-    <path android:fillColor="#1E263C"
-        android:pathData="M16,24 h76 a8,8 0 0 1 8,8 v44 a8,8 0 0 1 -8,8 h-76 a8,8 0 0 1 -8,-8 v-44 a8,8 0 0 1 8,-8 z" />
-    <!-- 화면 -->
-    <path android:fillColor="#0C1020"
-        android:pathData="M13,29 h82 v46 h-82 z" />
-    <!-- 힌지(경첩) -->
-    <path android:fillColor="#3C4A73" android:pathData="M53,24 h2 v52 h-2 z" />
-    <path android:fillColor="#6E8CFF" android:pathData="M53.5,25 h1 v8 h-1 z" />
+    <!-- 펼친 책 : 왼쪽 페이지 -->
+    <path android:fillColor="#F4EFE3"
+        android:pathData="M54,35 C45,31 33,30 22,32 L22,74 C33,72 45,73 54,77 Z" />
+    <!-- 펼친 책 : 오른쪽 페이지 -->
+    <path android:fillColor="#FBF7EC"
+        android:pathData="M54,35 C63,31 75,30 86,32 L86,74 C75,72 63,73 54,77 Z" />
 
-    <!-- 화면 속 펼친 책: 왼쪽 페이지 -->
-    <path android:fillColor="#E9DFC6"
-        android:pathData="M25,40 L53,36 L53,69 L25,72 Z" />
-    <!-- 오른쪽 페이지 -->
-    <path android:fillColor="#F3EAD3"
-        android:pathData="M55,36 L83,40 L83,72 L55,69 Z" />
-    <!-- 책등 그림자 -->
-    <path android:fillColor="#20283C" android:pathData="M53,36 L55,36 L55,69 L54,70 L53,69 Z" />
-    <!-- 왼쪽 페이지 글줄 -->
-    <path android:fillColor="#2C3350"
-        android:pathData="M29,46 L49,44 L49,46 L29,48 Z M29,53 L49,51.5 L49,53.5 L29,55 Z M29,60 L40,59 L40,61 L29,62 Z" />
+    <!-- 가운데 접힌 선(책등 = 폴드 힌지) -->
+    <path android:fillColor="#3E52C8" android:pathData="M51,33 h6 v46 h-6 z" />
 
-    <!-- 넘어가며 펼쳐지는 오른쪽 페이지 그림자 -->
-    <path android:fillColor="#C6B78F"
-        android:pathData="M55,37 C68,33 79,39 84,52 C79,42 68,38 56,41 Z" />
-    <!-- 넘어가며 펼쳐지는 페이지 (컬) -->
-    <path android:fillColor="#FBF4E2"
-        android:pathData="M55,37 C55,37 74,29 85,43 C92,52 89,66 78,73 C71,77 62,75 56,71 C61,60 61,47 55,37 Z" />
-
-    <!-- 넘김 방향 호 -->
-    <path android:strokeColor="#8CA6FF" android:strokeWidth="3.5" android:strokeLineCap="round"
-        android:fillColor="#00000000"
-        android:pathData="M88,40 A20,20 0 0 1 92,60" />
+    <!-- 넘어가는 오른쪽 페이지 모서리 -->
+    <path android:fillColor="#DCD3BC"
+        android:pathData="M86,58 L86,74 C79,72 72,72 66,73 C77,71 83,66 86,58 Z" />
+    <path android:fillColor="#FFFFFF"
+        android:pathData="M86,55 C86,55 86,68 78,73 C83,66 82,60 86,55 Z" />
 </vector>

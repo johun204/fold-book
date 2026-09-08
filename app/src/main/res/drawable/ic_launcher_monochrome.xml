@@ -1,10 +1,7 @@
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp" android:height="108dp"
     android:viewportWidth="108" android:viewportHeight="108">
-    <!-- 펼친 폴더블 본체 -->
     <path android:fillColor="#000000"
-        android:pathData="M16,24 h76 a8,8 0 0 1 8,8 v44 a8,8 0 0 1 -8,8 h-76 a8,8 0 0 1 -8,-8 v-44 a8,8 0 0 1 8,-8 z M13,29 h82 v46 h-82 z" />
-    <!-- 화면 속 펼친 책 + 넘어가는 페이지 -->
-    <path android:fillColor="#000000"
-        android:pathData="M25,40 L53,36 L53,69 L25,72 Z M55,36 L83,40 L83,55 C79,42 68,38 56,41 C61,52 61,60 56,71 C62,75 71,77 78,73 C89,66 92,52 85,43 C79,36 66,38 58,42 L55,42 Z" />
+        android:pathData="M54,35 C45,31 33,30 22,32 L22,74 C33,72 45,73 54,77 Z M54,35 C63,31 75,30 86,32 L86,74 C75,72 63,73 54,77 Z" />
+    <path android:fillColor="#000000" android:pathData="M51,33 h6 v46 h-6 z" />
 </vector>

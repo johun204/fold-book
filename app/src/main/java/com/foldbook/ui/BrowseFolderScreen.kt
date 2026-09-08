@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -36,10 +37,12 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -50,7 +53,6 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.ui.Alignment
@@ -61,15 +63,16 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.documentfile.provider.DocumentFile
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.foldbook.App
 import com.foldbook.ConnType
 import com.foldbook.Connection
+import com.foldbook.DownloadService
+import com.foldbook.DownloadState
 import com.foldbook.Entry
 import com.foldbook.ReaderActivity
 import com.foldbook.StorageBackend
 import com.foldbook.backendFor
-import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -84,7 +87,6 @@ fun BrowseFolderScreen(
     onConnectionRemoved: () -> Unit,
 ) {
     val ctx = LocalContext.current
-    val scope = rememberCoroutineScope()
     val conn = app.connections.get(connId)
     if (conn == null) {
         LaunchedEffect(Unit) { onBack() }
@@ -103,7 +105,8 @@ fun BrowseFolderScreen(
     var renaming by remember { mutableStateOf(false) }
     var selecting by remember { mutableStateOf(false) }
     val selected = remember { mutableStateMapOf<String, Boolean>() }
-    var progress by remember { mutableStateOf<Pair<Int, Int>?>(null) }
+    val download by DownloadService.state.collectAsStateWithLifecycle()
+    val notifPerm = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
 
     val needsPermission = conn.type == ConnType.LOCAL &&
         Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
@@ -125,20 +128,16 @@ fun BrowseFolderScreen(
 
     val treePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
-        val dest = DocumentFile.fromTreeUri(ctx, uri) ?: return@rememberLauncherForActivityResult
         val picked = entries.filter { selected[it.id] == true }
         selecting = false
         selected.clear()
-        scope.launch {
-            var done = 0
-            val total = countFiles(backend, picked)
-            progress = 0 to total
-            runCatching {
-                for (e in picked) copyInto(ctx, dest, backend, e) { done++; progress = done to total }
-            }
-            progress = null
-            android.widget.Toast.makeText(ctx, "다운로드 완료 (${done}개)", android.widget.Toast.LENGTH_SHORT).show()
+        if (picked.isEmpty()) return@rememberLauncherForActivityResult
+        runCatching {
+            ctx.contentResolver.takePersistableUriPermission(
+                uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+            )
         }
+        DownloadService.start(ctx, connId, uri, picked, curName.ifBlank { conn.label })
     }
 
     Scaffold(
@@ -186,7 +185,12 @@ fun BrowseFolderScreen(
                             DropdownMenuItem(
                                 text = { Text("파일/폴더 다운로드") },
                                 leadingIcon = { Icon(AppIcons.Download, null) },
-                                onClick = { menu = false; selecting = true; selected.clear() },
+                                onClick = {
+                                    menu = false; selecting = true; selected.clear()
+                                    if (Build.VERSION.SDK_INT >= 33) {
+                                        notifPerm.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                                    }
+                                },
                             )
                             if (conn.type != ConnType.LOCAL) {
                                 DropdownMenuItem(
@@ -253,6 +257,7 @@ fun BrowseFolderScreen(
                     }
                 }
             }
+            download?.let { DownloadBanner(it, Modifier.align(Alignment.BottomCenter)) }
         }
     }
 
@@ -260,14 +265,41 @@ fun BrowseFolderScreen(
         renaming = false
         if (new != null) app.connections.rename(connId, new)
     }
+}
 
-    progress?.let { (done, total) ->
-        AlertDialog(
-            onDismissRequest = {},
-            confirmButton = {},
-            title = { Text("다운로드 중") },
-            text = { Text(if (total > 0) "$done / $total" else "목록 확인 중…") },
-        )
+@Composable
+private fun DownloadBanner(d: DownloadState, modifier: Modifier) {
+    val ctx = LocalContext.current
+    Surface(modifier.fillMaxWidth(), tonalElevation = 3.dp, shadowElevation = 8.dp) {
+        Column(Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    when {
+                        d.error != null -> "다운로드 ${d.error}"
+                        d.finished -> "다운로드 완료 · ${d.done}개"
+                        d.total > 0 -> "다운로드 중 · ${d.done} / ${d.total}"
+                        else -> "다운로드 준비 중…"
+                    },
+                    Modifier.weight(1f),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                if (d.finished) {
+                    TextButton(onClick = { DownloadService.dismiss() }) { Text("닫기") }
+                } else {
+                    TextButton(onClick = { DownloadService.cancel(ctx) }) { Text("취소") }
+                }
+            }
+            if (!d.finished) {
+                if (d.total > 0) {
+                    LinearProgressIndicator(
+                        progress = { d.done.toFloat() / d.total },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                } else {
+                    LinearProgressIndicator(Modifier.fillMaxWidth())
+                }
+            }
+        }
     }
 }
 
@@ -359,41 +391,4 @@ private fun fullPath(conn: Connection, curId: String, crumb: String): String = w
     ConnType.LOCAL -> curId
     ConnType.SMB -> "smb://${conn.host}/${conn.share}" + (if (curId.isNotBlank()) "/${curId.trim('/')}" else "")
     ConnType.DRIVE -> crumb
-}
-
-private suspend fun countFiles(backend: StorageBackend, entries: List<Entry>): Int {
-    var n = 0
-    for (e in entries) n += if (e.isDir) countFiles(backend, backend.list(e.id)) else 1
-    return n
-}
-
-private suspend fun copyInto(
-    ctx: android.content.Context,
-    dest: DocumentFile,
-    backend: StorageBackend,
-    entry: Entry,
-    onFile: () -> Unit,
-) {
-    if (entry.isDir) {
-        val sub = dest.findFile(entry.name)?.takeIf { it.isDirectory }
-            ?: dest.createDirectory(entry.name) ?: return
-        for (child in backend.list(entry.id)) copyInto(ctx, sub, backend, child, onFile)
-    } else {
-        val existing = dest.findFile(entry.name)
-        val file = existing ?: dest.createFile(mimeOf(entry.name), entry.name) ?: return
-        ctx.contentResolver.openOutputStream(file.uri, "wt")?.use { out ->
-            backend.open(entry.id).use { it.copyTo(out) }
-        }
-        onFile()
-    }
-}
-
-private fun mimeOf(name: String) = when (name.substringAfterLast('.', "").lowercase()) {
-    "png" -> "image/png"
-    "webp" -> "image/webp"
-    "gif" -> "image/gif"
-    "bmp" -> "image/bmp"
-    "heic", "heif" -> "image/heic"
-    "avif" -> "image/avif"
-    else -> "image/jpeg"
 }
