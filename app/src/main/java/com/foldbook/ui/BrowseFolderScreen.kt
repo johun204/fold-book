@@ -37,12 +37,10 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -68,7 +66,6 @@ import com.foldbook.App
 import com.foldbook.ConnType
 import com.foldbook.Connection
 import com.foldbook.DownloadService
-import com.foldbook.DownloadState
 import com.foldbook.Entry
 import com.foldbook.ReaderActivity
 import com.foldbook.StorageBackend
@@ -257,49 +254,13 @@ fun BrowseFolderScreen(
                     }
                 }
             }
-            download?.let { DownloadBanner(it, Modifier.align(Alignment.BottomCenter)) }
+            download?.let { DownloadCard(it, Modifier.align(Alignment.BottomCenter)) }
         }
     }
 
     if (renaming) RenameDialog(conn.label) { new ->
         renaming = false
         if (new != null) app.connections.rename(connId, new)
-    }
-}
-
-@Composable
-private fun DownloadBanner(d: DownloadState, modifier: Modifier) {
-    val ctx = LocalContext.current
-    Surface(modifier.fillMaxWidth(), tonalElevation = 3.dp, shadowElevation = 8.dp) {
-        Column(Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    when {
-                        d.error != null -> "다운로드 ${d.error}"
-                        d.finished -> "다운로드 완료 · ${d.done}개"
-                        d.total > 0 -> "다운로드 중 · ${d.done} / ${d.total}"
-                        else -> "다운로드 준비 중…"
-                    },
-                    Modifier.weight(1f),
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-                if (d.finished) {
-                    TextButton(onClick = { DownloadService.dismiss() }) { Text("닫기") }
-                } else {
-                    TextButton(onClick = { DownloadService.cancel(ctx) }) { Text("취소") }
-                }
-            }
-            if (!d.finished) {
-                if (d.total > 0) {
-                    LinearProgressIndicator(
-                        progress = { d.done.toFloat() / d.total },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                } else {
-                    LinearProgressIndicator(Modifier.fillMaxWidth())
-                }
-            }
-        }
     }
 }
 

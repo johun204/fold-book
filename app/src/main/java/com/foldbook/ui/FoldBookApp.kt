@@ -16,6 +16,7 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -33,9 +34,16 @@ const val ROOT = "__root__"
 private const val T = 230
 
 @Composable
-fun FoldBookApp() {
+fun FoldBookApp(pendingRoute: String? = null, onRouteConsumed: () -> Unit = {}) {
     val nav = rememberNavController()
     val app = App.of(LocalContext.current)
+
+    LaunchedEffect(pendingRoute) {
+        if (pendingRoute != null) {
+            nav.tab(pendingRoute)
+            onRouteConsumed()
+        }
+    }
 
     val backStack by nav.currentBackStackEntryAsState()
     val route = backStack?.destination?.route

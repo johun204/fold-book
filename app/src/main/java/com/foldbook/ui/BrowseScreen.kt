@@ -39,11 +39,13 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.foldbook.App
 import com.foldbook.ConnType
 import com.foldbook.Connection
+import com.foldbook.DownloadService
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun BrowseScreen(app: App, onOpen: (Connection) -> Unit) {
     val connections by app.connections.flow.collectAsStateWithLifecycle()
+    val download by DownloadService.state.collectAsStateWithLifecycle()
     var showAdd by remember { mutableStateOf(false) }
     var menuFor by remember { mutableStateOf<String?>(null) }
     var renaming by remember { mutableStateOf<Connection?>(null) }
@@ -59,6 +61,7 @@ fun BrowseScreen(app: App, onOpen: (Connection) -> Unit) {
         },
     ) { pad ->
         LazyColumn(Modifier.fillMaxSize().padding(pad)) {
+            download?.let { item(key = "download") { DownloadCard(it) } }
             items(connections, key = { it.id }) { c ->
                 Row {
                     ListItem(

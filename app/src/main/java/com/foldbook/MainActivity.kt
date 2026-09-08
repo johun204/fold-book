@@ -8,11 +8,16 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.foldbook.ui.FoldBookApp
 import com.foldbook.ui.FoldBookTheme
 
 class MainActivity : ComponentActivity() {
+
+    // 알림 탭 등으로 특정 탭을 열어야 할 때(null = 없음). Compose 가 관찰해 이동 후 소비한다.
+    private var pendingRoute by mutableStateOf<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -23,6 +28,7 @@ class MainActivity : ComponentActivity() {
             finish()
             return
         }
+        pendingRoute = routeOf(intent)
 
         enableEdgeToEdge()
         setContent {
@@ -36,8 +42,21 @@ class MainActivity : ComponentActivity() {
                 }
             }
             FoldBookTheme {
-                FoldBookApp()
+                FoldBookApp(pendingRoute = pendingRoute, onRouteConsumed = { pendingRoute = null })
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        routeOf(intent)?.let { pendingRoute = it }
+    }
+
+    private fun routeOf(i: Intent?): String? =
+        if (i?.getBooleanExtra(EXTRA_SHOW_DOWNLOADS, false) == true) "browse" else null
+
+    companion object {
+        const val EXTRA_SHOW_DOWNLOADS = "showDownloads"
     }
 }
