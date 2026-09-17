@@ -83,6 +83,12 @@ public class PageFlip {
     // width ratio of triggering restore flip
     private final static float WIDTH_RATIO_OF_RESTORE_FLIP = 0.5f;
 
+    /**
+     * 손가락이 기준점에서 멀어질 수 있는 최대 거리(페이지 폭 배수). 2.0 이면 페이지가 완전히
+     * 넘어가 접힘 원기둥 반지름이 0 이 되므로 그 직전 값으로 둔다.
+     */
+    private final static float MAX_DRAG_WIDTH_RATIO = 1.9f;
+
     // folder page shadow color buffer size
     private final static int FOLD_TOP_EDGE_SHADOW_VEX_COUNT = 22;
 
@@ -651,7 +657,11 @@ public class PageFlip {
         if (mFlipState == PageFlipState.BEGIN_FLIP &&
             (Math.abs(dx) > mViewRect.width * 0.05f)) {
             // set OriginP and DiagonalP points
-            page.setOriginAndDiagonalPoints(mPages[SECOND_PAGE] != null, dy);
+            // 단면 모드에서 오른쪽으로 끄는 중이면 왼쪽 가장자리를 기준점으로 삼는다. 그러면
+            // '넘어갈 페이지가 펼쳐지는' 뒤로 넘김(BACKWARD_FLIP) 대신, 오른쪽으로 끌 때도
+            // '현재 페이지가 접히면서 넘어갈 페이지가 드러나는' 앞으로 넘김이 된다.
+            page.setOriginAndDiagonalPoints(mPages[SECOND_PAGE] != null || dx > 0,
+                                            dy);
 
             // compute max degree between X axis and line from TouchP to OriginP
             // and max degree between X axis and line from TouchP to
@@ -663,8 +673,11 @@ public class PageFlip {
 
             // moving at the top and bottom screen have different tan value of
             // angle
-            if ((originP.y < 0 && page.right > 0) ||
-                (originP.y > 0 && page.right <= 0)) {
+            // 원본은 '왼쪽 페이지인가'(page.right <= 0)로 좌우를 판정했지만, 단면 모드에서도
+            // 왼쪽 가장자리를 기준점으로 쓰게 됐으므로 기준점의 좌우로 판정한다.
+            // (양면 모드에서는 왼쪽 페이지 ⟺ originP.x < 0 이라 결과가 같다)
+            if ((originP.y < 0 && originP.x > 0) ||
+                (originP.y > 0 && originP.x < 0)) {
                 mMaxT2OAngleTan = -mMaxT2OAngleTan;
             }
             else {
@@ -728,21 +741,29 @@ public class PageFlip {
             float xFoldX1 = xRatio * xTouchX;
             if (Math.abs(xFoldX1) + 2 >= page.width) {
                 float dy2 = ((diagonalP.x - originP.x) / xRatio - dx) * dx;
-                // ignore current moving if we can't get a valid dy, for example
-                // , in double pages mode, when finger is moving from the one
-                // page to another page, the dy2 is negative and should be
-                // ignored
+                // dy2 < 0 이면 손가락이 이 페이지 폭을 넘어섰다는 뜻이다(양면 모드에서 한쪽
+                // 페이지를 잡고 반대쪽 페이지 영역까지 끌고 간 경우). 원본은 여기서 움직임을
+                // 버려 손가락을 놓쳤지만, 우리는 접힌 페이지를 스파인 기준으로 계속 회전시켜
+                // 손가락을 따라가게 한다 (limitFoldXInDoublePage). 완전히 넘어가는 지점
+                // (페이지 폭의 2배)에서 원기둥 반지름이 0 이 되므로 그 직전까지만 허용한다.
                 if (dy2 < 0) {
-                    return false;
-                }
-
-                double t = Math.sqrt(dy2);
-                if (originP.y > 0) {
-                    t = -t;
-                    dy = (int)Math.ceil(t);
+                    if (mPages[SECOND_PAGE] == null) {
+                        return false;
+                    }
+                    float maxDx = MAX_DRAG_WIDTH_RATIO * page.width;
+                    if (Math.abs(dx) > maxDx) {
+                        dx = dx < 0 ? -maxDx : maxDx;
+                    }
                 }
                 else {
-                    dy = (int)Math.floor(t);
+                    double t = Math.sqrt(dy2);
+                    if (originP.y > 0) {
+                        t = -t;
+                        dy = (int)Math.ceil(t);
+                    }
+                    else {
+                        dy = (int)Math.floor(t);
+                    }
                 }
             }
 
@@ -786,7 +807,8 @@ public class PageFlip {
                 end.x = (int)originP.x;
                 mFlipState = PageFlipState.RESTORE_FLIP;
             }
-            else if (hasSecondPage && originP.x < 0) {
+            // 기준점이 왼쪽이면 오른쪽으로 넘어가야 한다 (단면 모드의 뒤로 넘김도 포함)
+            else if (originP.x < 0) {
                 end.x = (int)(diagonalP.x + page.width);
             }
             else {
@@ -954,40 +976,15 @@ public class PageFlip {
 
             // in double page mode
             if (mPages[SECOND_PAGE] != null) {
-                // if the xFoldP1.x is outside page width, need to limit
-                // xFoldP1.x is in page.width and recompute new key points so
-                // that the page flip is still going forward
                 if (page.isXOutsidePage(mXFoldP1.x)) {
-                    mXFoldP1.x = diagonalP.x;
-                    float cosA = (mTouchP.x - originP.x) / mLenOfTouchOrigin;
-                    float ratio = 1 - page.width * Math.abs(cosA) /
-                                      mLenOfTouchOrigin;
-                    mR = (float)(mLenOfTouchOrigin * (1 - 2 * ratio) / Math.PI);
-                    mXFoldP0.x = mLenOfTouchOrigin * ratio / cosA + originP.x;
-
-                    if (mIsVertical) {
-                        mYFoldP0.x = mXFoldP0.x;
-                        mYFoldP1.x = mXFoldP1.x;
-                    }
-                    else {
-                        mYFoldP1.y = originP.y + (mXFoldP1.x - originP.x)
-                                                 / mKValue;
-                        mYFoldP0.y = originP.y + (mXFoldP0.x - originP.x)
-                                                 / mKValue;
-                    }
-
-                    // re-compute mesh count
-                    float len = Math.abs(mMiddleP.x - mXFoldP0.x);
-                    if (mMeshCount > len) {
-                        mMeshCount = (int)len;
-                    }
-                    isAnimating = mMeshCount > 0 &&
-                                  Math.abs(mXFoldP0.x - diagonalP.x) >= 2;
+                    isAnimating = limitFoldXInDoublePage();
                 }
             }
             // in single page mode, check if the whole fold page is outside the
             // screen and animating should be stopped
-            else if (mFlipState == PageFlipState.FORWARD_FLIP) {
+            // (기준점이 왼쪽인 넘김은 좌우가 뒤집혀 이 판정이 맞지 않으므로, 스크롤러가
+            //  끝날 때까지 그냥 돌린다)
+            else if (mFlipState == PageFlipState.FORWARD_FLIP && originP.x > 0) {
                 float r = (float)(mLenOfTouchOrigin * mSemiPerimeterRatio /
                                   Math.PI);
                 float x = (mYFoldP1.y - diagonalP.y) * mKValue + r;
@@ -1008,6 +1005,17 @@ public class PageFlip {
         }
 
         return isAnimating;
+    }
+
+    /**
+     * 지금 접히고 있는 페이지의 기준 꼭지점이 화면 왼쪽인가?
+     * <p>단면 모드에서는 '왼쪽 → 오른쪽' 드래그(= 라이브러리상 뒤로 넘김)일 때 true,
+     * 양면 모드에서는 왼쪽 페이지를 잡았을 때 true</p>
+     *
+     * @return true 면 왼쪽 가장자리가 기준점
+     */
+    public boolean isOriginAtLeft() {
+        return mPages[FIRST_PAGE] != null && mPages[FIRST_PAGE].originP.x < 0;
     }
 
     /**
@@ -1185,12 +1193,63 @@ public class PageFlip {
     private void computeVertexesAndBuildPage() {
         if (mIsVertical) {
             computeKeyVertexesWhenVertical();
-            computeVertexesWhenVertical();
         }
         else {
             computeKeyVertexesWhenSlope();
+        }
+
+        // 양면 모드에서 접힘선이 페이지 밖(스파인 너머)으로 나가면 스파인 기준 회전으로 바꾼다.
+        // 애니메이션뿐 아니라 손가락 드래그 중에도 적용해, 반대쪽 페이지 위까지 끌고 갈 수 있다.
+        if (mPages[SECOND_PAGE] != null &&
+            mPages[FIRST_PAGE].isXOutsidePage(mXFoldP1.x)) {
+            limitFoldXInDoublePage();
+        }
+
+        if (mIsVertical) {
+            computeVertexesWhenVertical();
+        }
+        else {
             computeVertexesWhenSlope();
         }
+    }
+
+    /**
+     * 양면 모드에서 접힘선(xFoldP1)을 페이지 안(스파인)으로 제한하고, 접힘 원기둥을 다시 계산해
+     * 페이지가 스파인을 축으로 계속 넘어가게 한다.
+     *
+     * @return 접힘이 아직 유효한가 (false 면 페이지가 완전히 넘어간 상태)
+     */
+    private boolean limitFoldXInDoublePage() {
+        final Page page = mPages[FIRST_PAGE];
+        final GLPoint originP = page.originP;
+        final GLPoint diagonalP = page.diagonalP;
+
+        mXFoldP1.x = diagonalP.x;
+        float cosA = (mTouchP.x - originP.x) / mLenOfTouchOrigin;
+        float ratio = 1 - page.width * Math.abs(cosA) / mLenOfTouchOrigin;
+        // ratio >= 0.5 면 반지름이 0 이하가 되어 접힘이 뒤집혀 그려진다 (페이지가 완전히
+        // 넘어간 상태) — 0.49 로 묶어 항상 정상 방향의 얇은 접힘으로 끝내게 한다.
+        if (ratio > 0.49f) {
+            ratio = 0.49f;
+        }
+        mR = (float)(mLenOfTouchOrigin * (1 - 2 * ratio) / Math.PI);
+        mXFoldP0.x = mLenOfTouchOrigin * ratio / cosA + originP.x;
+
+        if (mIsVertical) {
+            mYFoldP0.x = mXFoldP0.x;
+            mYFoldP1.x = mXFoldP1.x;
+        }
+        else {
+            mYFoldP1.y = originP.y + (mXFoldP1.x - originP.x) / mKValue;
+            mYFoldP0.y = originP.y + (mXFoldP0.x - originP.x) / mKValue;
+        }
+
+        // re-compute mesh count
+        float len = Math.abs(mMiddleP.x - mXFoldP0.x);
+        if (mMeshCount > len) {
+            mMeshCount = (int)len;
+        }
+        return mMeshCount > 0 && Math.abs(mXFoldP0.x - diagonalP.x) >= 2;
     }
 
     /**

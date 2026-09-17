@@ -18,9 +18,13 @@ import javax.microedition.khronos.opengles.GL10
  * 종이책 3D 페이지 넘김 뷰 (eschao PageFlip). 드래그하는 손가락을 따라 페이지가 말린다.
  * doublePage=true 면 가로 화면에서 좌우 두 페이지를 함께 보여준다.
  *
+ * 어느 쪽으로 끌든 **현재 페이지가 접히면서 넘어갈 페이지가 드러난다**(라이브러리를 고쳐 왼쪽
+ * 가장자리 기준 접힘도 앞으로 넘김으로 처리). 드래그는 손을 뗄 때까지 손가락을 따라가며,
+ * 페이지 폭의 절반을 넘겼으면 넘어가고 아니면 제자리로 돌아간다.
+ *
  * rtl=true(일본 만화) 는 **효과를 좌우로 뒤집지 않는다.** [PageImageProvider] 가 라이브러리 순번을
- * 읽기 순번의 역순으로 매핑하므로, 라이브러리는 LTR 그대로 동작하고 "왼쪽→오른쪽 드래그"(eschao 의
- * backward flip)가 읽기상 다음 파일을, "오른쪽→왼쪽 드래그"가 이전 파일을 불러온다.
+ * 읽기 순번의 역순으로 매핑하므로, 라이브러리는 LTR 그대로 동작하고 "왼쪽→오른쪽 드래그"가
+ * 읽기상 다음 파일을, "오른쪽→왼쪽 드래그"가 이전 파일을 불러온다.
  * 즉 넘김 애니메이션은 원본 그대로이고, 다음/이전 파일 계산만 반대가 된다.
  */
 class PageFlipView(
@@ -56,10 +60,6 @@ class PageFlipView(
     private var downY = 0f
     private var downT = 0L
     private var dragging = false
-    private var dragRight = false      // 드래그가 오른쪽 방향인가 (첫 유효 이동에서 확정)
-    private var flipActive = false     // eschao 가 실제 컬을 시작했는가
-    private var autoReleased = false   // 화면 절반을 지나 자동으로 손 뗀 처리를 했는가
-    private var synthetic = false      // 합성 제스처(탭 넘김·접힘 제스처) 진행 중
 
     /** 읽기 순번 ↔ 라이브러리 순번 (rtl 이면 역순). 둘 다 1-based. */
     private fun toLib(readingPage: Int): Int =
@@ -117,13 +117,12 @@ class PageFlipView(
             MotionEvent.ACTION_DOWN -> {
                 downX = x; downY = y
                 downT = SystemClock.uptimeMillis()
-                dragging = false; flipActive = false; autoReleased = false
+                dragging = false
                 fingerDown(x, y)
             }
             MotionEvent.ACTION_MOVE -> {
                 if (!dragging && (kotlin.math.hypot(x - downX, y - downY) > touchSlop)) {
                     dragging = true
-                    dragRight = x >= downX
                 }
                 if (dragging) fingerMove(x, y)
             }
@@ -131,16 +130,10 @@ class PageFlipView(
                 val isTap = !dragging &&
                     SystemClock.uptimeMillis() - downT < 220 &&
                     kotlin.math.hypot(x - downX, y - downY) <= touchSlop
-                if (!autoReleased) {
-                    pageFlip.onFingerUp(
-                        x.coerceIn(0f, width.toFloat()), y.coerceIn(0f, height.toFloat()), duration,
-                    )
-                    lock.lock()
-                    try { if (render.onFingerUp()) requestRender() } finally { lock.unlock() }
-                }
+                fingerUp(x, y)
                 if (isTap) onEdgeTapOrOverlay(x)
             }
-            MotionEvent.ACTION_CANCEL -> if (!autoReleased) fingerUp(x, y)
+            MotionEvent.ACTION_CANCEL -> fingerUp(x, y)
         }
         return true
     }
@@ -173,22 +166,17 @@ class PageFlipView(
     fun flipForward() = synthFlip(fromRightEdge = !rtl)
     fun flipBackward() = synthFlip(fromRightEdge = rtl)
 
-    /** fromRightEdge=true → 오른쪽에서 왼쪽(eschao forward flip), false → 왼쪽에서 오른쪽(backward flip). */
+    /** fromRightEdge=true → 오른쪽에서 왼쪽으로 접기, false → 왼쪽에서 오른쪽으로 접기. */
     private fun synthFlip(fromRightEdge: Boolean) {
         if (width == 0 || pageFlip.isAnimating) return
         val y = height / 2f
         val w = width.toFloat()
-        synthetic = true
-        try {
-            if (fromRightEdge) {
-                downX = w * 0.92f; downY = y
-                fingerDown(w * 0.92f, y); fingerMove(w * 0.55f, y); fingerMove(w * 0.2f, y); fingerUp(w * 0.06f, y)
-            } else {
-                downX = w * 0.08f; downY = y
-                fingerDown(w * 0.08f, y); fingerMove(w * 0.45f, y); fingerMove(w * 0.8f, y); fingerUp(w * 0.94f, y)
-            }
-        } finally {
-            synthetic = false
+        if (fromRightEdge) {
+            downX = w * 0.92f; downY = y
+            fingerDown(w * 0.92f, y); fingerMove(w * 0.55f, y); fingerMove(w * 0.2f, y); fingerUp(w * 0.06f, y)
+        } else {
+            downX = w * 0.08f; downY = y
+            fingerDown(w * 0.08f, y); fingerMove(w * 0.45f, y); fingerMove(w * 0.8f, y); fingerUp(w * 0.94f, y)
         }
     }
 
@@ -198,24 +186,14 @@ class PageFlipView(
 
     private fun fingerMove(x: Float, y: Float) {
         if (pageFlip.isAnimating) return
-        if (autoReleased && !synthetic) return
         val cx = x.coerceIn(0f, width.toFloat())
         val cy = y.coerceIn(0f, height.toFloat())
         if (pageFlip.onFingerMove(cx, cy)) {
-            if (!synthetic) flipActive = true
             lock.lock()
             try {
                 if (render.onFingerMove()) requestRender()
             } finally {
                 lock.unlock()
-            }
-        }
-        // 실제 드래그가 화면 절반을 지나면 손을 뗀 것과 같게 처리 → 다음/이전 페이지로 확정.
-        if (!synthetic && flipActive && !autoReleased) {
-            val pastHalf = if (dragRight) cx >= width * 0.5f else cx <= width * 0.5f
-            if (pastHalf) {
-                autoReleased = true
-                fingerUp(cx, cy)
             }
         }
     }

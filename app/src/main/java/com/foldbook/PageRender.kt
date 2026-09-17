@@ -99,17 +99,20 @@ abstract class PageRender(
         ob: (Boolean) -> Unit, os: (Int) -> Unit,
     ) : PageRender(pf, h, p, pageNo, ob, os) {
 
+        /** 왼쪽 가장자리를 기준으로 접히는 중인가 = 라이브러리상 '뒤로' 넘기는 중. */
+        private val backward get() = pageFlip.isOriginAtLeft
+
+        /** 지금 넘김이 끝나면 화면에 남을 페이지 (접히는 현재 페이지 아래에 깔리는 페이지). */
+        private fun targetNo() = if (backward) pageNo - 1 else pageNo + 1
+
         override fun onDrawFrame() {
             pageFlip.deleteUnusedTextures()
             val page = pageFlip.firstPage
             when (drawCommand) {
                 DRAW_MOVING_FRAME, DRAW_ANIMATING_FRAME -> {
-                    if (pageFlip.flipState == PageFlipState.FORWARD_FLIP) {
-                        if (!page.isSecondTextureSet) page.setSecondTexture(provider.bitmap(pageNo + 1))
-                    } else if (!page.isFirstTextureSet) {
-                        pageNo--
-                        page.setFirstTexture(provider.bitmap(pageNo))
-                    }
+                    // 어느 방향이든 '현재 페이지(first)'가 접히고 그 아래 넘어갈 페이지(second)가 드러난다
+                    if (!page.isFirstTextureSet) page.setFirstTexture(provider.bitmap(pageNo))
+                    if (!page.isSecondTextureSet) page.setSecondTexture(provider.bitmap(targetNo()))
                     pageFlip.drawFlipFrame()
                 }
                 DRAW_FULL_PAGE -> {
@@ -133,32 +136,29 @@ abstract class PageRender(
                 drawCommand = DRAW_ANIMATING_FRAME
                 return true
             }
-            when (pageFlip.flipState) {
-                PageFlipState.END_WITH_FORWARD -> {
-                    pageFlip.firstPage.setFirstTextureWithSecond()
-                    pageNo++
-                    drawCommand = DRAW_FULL_PAGE
-                    settled()
-                }
-                PageFlipState.END_WITH_BACKWARD -> {
-                    drawCommand = DRAW_FULL_PAGE
-                    settled()
-                }
-                else -> drawCommand = DRAW_FULL_PAGE
+            if (pageFlip.flipState == PageFlipState.END_WITH_FORWARD) {
+                pageFlip.firstPage.setFirstTextureWithSecond()
+                pageNo = targetNo().coerceIn(1, maxOf(1, provider.count))
+                drawCommand = DRAW_FULL_PAGE
+                settled()
+            } else {
+                // 제자리로 돌아온 경우: 미리 올려둔 '넘어갈 페이지' 텍스처를 버려서
+                // 다음에 반대 방향으로 끌 때 엉뚱한 페이지가 비치지 않게 한다
+                pageFlip.firstPage.deleteAllTextures()
+                firstReal = false
+                drawCommand = DRAW_FULL_PAGE
             }
             return true
         }
 
-        override fun canFlipForward(): Boolean =
-            if (pageNo < provider.count) true else blockAtBoundary(true)
-
-        override fun canFlipBackward(): Boolean {
-            if (pageNo > 1) {
-                pageFlip.firstPage.setSecondTextureWithFirst()
-                return true
-            }
-            return blockAtBoundary(false)
+        override fun canFlipForward(): Boolean = when {
+            backward -> if (pageNo > 1) true else blockAtBoundary(false)
+            pageNo < provider.count -> true
+            else -> blockAtBoundary(true)
         }
+
+        /** 라이브러리의 뒤로 넘김(넘어갈 페이지가 펼쳐지는 효과)은 쓰지 않는다. */
+        override fun canFlipBackward(): Boolean = false
     }
 
     // --- Double -----------------------------------------------------------
@@ -225,7 +225,8 @@ abstract class PageRender(
         override fun canFlipForward(): Boolean {
             val page = pageFlip.firstPage
             val ok = if (page.isLeftPage) pageNo > 1 else pageNo + 2 <= provider.count
-            return if (ok) true else blockAtBoundary(true)
+            // 왼쪽 페이지를 넘기는 건 라이브러리상 '뒤로' 이므로 경계도 뒤로 알려야 한다
+            return if (ok) true else blockAtBoundary(!page.isLeftPage)
         }
 
         override fun canFlipBackward(): Boolean = false
