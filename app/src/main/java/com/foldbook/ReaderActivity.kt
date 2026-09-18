@@ -375,7 +375,12 @@ class ReaderActivity : ComponentActivity() {
     /** 확인 후 다음 권으로: 현재 세션을 '완료' 로 옮기고 캐시를 정리한 뒤 새 폴더를 연다. */
     private fun goNextVolume(folder: Entry) {
         val cur = session ?: return
-        app.sessions.upsert(cur.copy(finished = true, pageIndex = (cur.pageCount - 1).coerceAtLeast(0)))
+        // session 필드까지 '완료' 로 바꿔야 한다. 안 그러면 뒤이어 도는 지연 저장·onPause 가
+        // 아직 finished=false 인 옛 값을 다시 써서 이전 권이 홈의 '이어보기' 에 되살아난다.
+        saveJob?.cancel()
+        val done = cur.copy(finished = true, pageIndex = (cur.pageCount - 1).coerceAtLeast(0))
+        session = done
+        app.sessions.upsert(done)
         source?.close()
         SessionCache.clear(this, cur.id)
         rolling = true          // onDestroy 에서 source 를 다시 닫지 않도록
