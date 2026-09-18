@@ -66,6 +66,22 @@ abstract class PageRender(
         return false
     }
 
+    /**
+     * 넘김 애니메이션이 진행 중이거나, 끝 처리(텍스처 교체·페이지 번호 확정)가 아직 안 끝났는가.
+     * 스크롤러만 보면 '끝났지만 아직 정리 안 된' 순간을 놓쳐서 엉뚱한 페이지가 번쩍인다.
+     */
+    val busy get() = drawCommand == DRAW_ANIMATING_FRAME
+
+    /**
+     * 진행 중인 넘김을 그 자리에서 끝난 것으로 확정한다 (넘김 도중에 또 넘길 때).
+     * 호출자가 lock 을 잡아야 한다. GL 호출은 하지 않는다(텍스처 id 정리는 다음 프레임에서).
+     */
+    fun settleNow(): Boolean {
+        if (!busy) return false
+        pageFlip.abortAnimating()
+        return onEndedDrawing(DRAW_ANIMATING_FRAME)
+    }
+
     protected fun notifyEnded() {
         handler.sendMessage(Message.obtain().apply {
             what = MSG_ENDED_DRAWING_FRAME
@@ -105,9 +121,17 @@ abstract class PageRender(
         /** 지금 넘김이 끝나면 화면에 남을 페이지 (접히는 현재 페이지 아래에 깔리는 페이지). */
         private fun targetNo() = if (backward) pageNo - 1 else pageNo + 1
 
+        /** 되돌린 뒤 미리 올려둔 '넘어갈 페이지' 텍스처를 버려야 하는가 (GL 스레드에서 처리). */
+        private var dropPreview = false
+
         override fun onDrawFrame() {
             pageFlip.deleteUnusedTextures()
             val page = pageFlip.firstPage
+            if (dropPreview) {
+                dropPreview = false
+                page.deleteAllTextures()
+                firstReal = false
+            }
             when (drawCommand) {
                 DRAW_MOVING_FRAME, DRAW_ANIMATING_FRAME -> {
                     // 어느 방향이든 '현재 페이지(first)'가 접히고 그 아래 넘어갈 페이지(second)가 드러난다
@@ -131,7 +155,9 @@ abstract class PageRender(
         }
 
         override fun onEndedDrawing(what: Int): Boolean {
-            if (what != DRAW_ANIMATING_FRAME) return false
+            // 이미 끝 처리를 했거나(연속 넘김으로 확정) 새 드래그가 시작됐으면, 뒤늦게 도착한
+            // 프레임 통지는 버린다. 안 그러면 페이지가 두 번 넘어가거나 잠깐 되돌아가 번쩍인다.
+            if (what != DRAW_ANIMATING_FRAME || !busy) return false
             if (pageFlip.animating()) {
                 drawCommand = DRAW_ANIMATING_FRAME
                 return true
@@ -143,9 +169,9 @@ abstract class PageRender(
                 settled()
             } else {
                 // 제자리로 돌아온 경우: 미리 올려둔 '넘어갈 페이지' 텍스처를 버려서
-                // 다음에 반대 방향으로 끌 때 엉뚱한 페이지가 비치지 않게 한다
-                pageFlip.firstPage.deleteAllTextures()
-                firstReal = false
+                // 다음에 반대 방향으로 끌 때 엉뚱한 페이지가 비치지 않게 한다.
+                // (이 함수는 메인 스레드라 GL 컨텍스트가 없다 -> 실제 삭제는 다음 프레임에서)
+                dropPreview = true
                 drawCommand = DRAW_FULL_PAGE
             }
             return true
@@ -202,7 +228,9 @@ abstract class PageRender(
         }
 
         override fun onEndedDrawing(what: Int): Boolean {
-            if (what != DRAW_ANIMATING_FRAME) return false
+            // 이미 끝 처리를 했거나(연속 넘김으로 확정) 새 드래그가 시작됐으면, 뒤늦게 도착한
+            // 프레임 통지는 버린다. 안 그러면 페이지가 두 번 넘어가거나 잠깐 되돌아가 번쩍인다.
+            if (what != DRAW_ANIMATING_FRAME || !busy) return false
             if (pageFlip.animating()) {
                 drawCommand = DRAW_ANIMATING_FRAME
                 return true

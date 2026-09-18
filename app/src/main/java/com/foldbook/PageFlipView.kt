@@ -1,5 +1,8 @@
 package com.foldbook
 
+import android.animation.Animator
+import android.animation.AnimatorListenerAdapter
+import android.animation.ValueAnimator
 import android.annotation.SuppressLint
 import android.content.Context
 import android.opengl.GLSurfaceView
@@ -60,6 +63,8 @@ class PageFlipView(
     private var downY = 0f
     private var downT = 0L
     private var dragging = false
+    private var deferredDown = false   // 넘김 진행 중에 눌러서 잡기를 미뤄둔 상태
+    private var synthAnim: ValueAnimator? = null   // 탭·접힘 제스처의 합성 드래그
 
     /** 읽기 순번 ↔ 라이브러리 순번 (rtl 이면 역순). 둘 다 1-based. */
     private fun toLib(readingPage: Int): Int =
@@ -118,11 +123,21 @@ class PageFlipView(
                 downX = x; downY = y
                 downT = SystemClock.uptimeMillis()
                 dragging = false
-                fingerDown(x, y)
+                synthAnim?.cancel()          // 탭 넘김 중이었으면 그 자리에서 손 뗀 것으로 마무리
+                // 넘김이 진행 중이면 아직 잡지 않는다. 손가락이 실제로 움직이거나(드래그)
+                // 가장자리 탭으로 확정될 때 진행 중인 넘김을 확정하고 새 넘김을 시작한다.
+                // (그냥 화면을 건드린 것만으로 애니메이션이 끊기지 않게)
+                deferredDown = renderBusy()
+                if (!deferredDown) fingerDown(x, y)
             }
             MotionEvent.ACTION_MOVE -> {
                 if (!dragging && (kotlin.math.hypot(x - downX, y - downY) > touchSlop)) {
                     dragging = true
+                    if (deferredDown) {
+                        deferredDown = false
+                        settleFlip()
+                        fingerDown(downX, downY)
+                    }
                 }
                 if (dragging) fingerMove(x, y)
             }
@@ -130,10 +145,14 @@ class PageFlipView(
                 val isTap = !dragging &&
                     SystemClock.uptimeMillis() - downT < 220 &&
                     kotlin.math.hypot(x - downX, y - downY) <= touchSlop
-                fingerUp(x, y)
+                if (!deferredDown) fingerUp(x, y)   // 잡지 않았으면 놓을 것도 없다
+                deferredDown = false
                 if (isTap) onEdgeTapOrOverlay(x)
             }
-            MotionEvent.ACTION_CANCEL -> fingerUp(x, y)
+            MotionEvent.ACTION_CANCEL -> {
+                if (!deferredDown) fingerUp(x, y)
+                deferredDown = false
+            }
         }
         return true
     }
@@ -166,17 +185,53 @@ class PageFlipView(
     fun flipForward() = synthFlip(fromRightEdge = !rtl)
     fun flipBackward() = synthFlip(fromRightEdge = rtl)
 
-    /** fromRightEdge=true → 오른쪽에서 왼쪽으로 접기, false → 왼쪽에서 오른쪽으로 접기. */
+    /**
+     * fromRightEdge=true → 오른쪽에서 왼쪽으로 접기, false → 왼쪽에서 오른쪽으로 접기.
+     *
+     * 손가락으로 끄는 것처럼 [SYNTH_DRAG_MS] 동안 천천히 끌어서 페이지 절반을 살짝 넘긴 뒤 놓는다.
+     * (예전엔 곧바로 끝까지 끌어버려 넘김 효과가 거의 안 보였다)
+     */
     private fun synthFlip(fromRightEdge: Boolean) {
-        if (width == 0 || pageFlip.isAnimating) return
+        if (width == 0) return
+        synthAnim?.cancel()
+        settleFlip()
+        if (pageFlip.isAnimating) return
+
         val y = height / 2f
         val w = width.toFloat()
-        if (fromRightEdge) {
-            downX = w * 0.92f; downY = y
-            fingerDown(w * 0.92f, y); fingerMove(w * 0.55f, y); fingerMove(w * 0.2f, y); fingerUp(w * 0.06f, y)
-        } else {
-            downX = w * 0.08f; downY = y
-            fingerDown(w * 0.08f, y); fingerMove(w * 0.45f, y); fingerMove(w * 0.8f, y); fingerUp(w * 0.94f, y)
+        val from = if (fromRightEdge) w * 0.92f else w * 0.08f
+        val to = if (fromRightEdge) w * 0.40f else w * 0.60f   // 되돌림 임계(페이지 절반)를 넘긴 지점
+        downX = from; downY = y
+        fingerDown(from, y)
+        synthAnim = ValueAnimator.ofFloat(from, to).apply {
+            duration = SYNTH_DRAG_MS
+            addUpdateListener { fingerMove(it.animatedValue as Float, y) }
+            addListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: Animator) {
+                    synthAnim = null
+                    fingerUp(to, y)          // 나머지 절반은 라이브러리 스크롤러가 duration 동안
+                }
+            })
+            start()
+        }
+    }
+
+    /** 진행 중인 넘김이 있으면 그 자리에서 끝난 것으로 확정한다 (넘김 도중 또 넘기기). */
+    private fun settleFlip() {
+        lock.lock()
+        try {
+            if (render.settleNow()) requestRender()
+        } finally {
+            lock.unlock()
+        }
+    }
+
+    private fun renderBusy(): Boolean {
+        lock.lock()
+        try {
+            return render.busy
+        } finally {
+            lock.unlock()
         }
     }
 
@@ -266,6 +321,11 @@ class PageFlipView(
             }
             requestRender()
         }
+    }
+
+    private companion object {
+        /** 탭·접힘 제스처로 넘길 때 합성 드래그에 쓰는 시간(ms). 길수록 넘어가는 게 잘 보인다. */
+        const val SYNTH_DRAG_MS = 420L
     }
 
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {

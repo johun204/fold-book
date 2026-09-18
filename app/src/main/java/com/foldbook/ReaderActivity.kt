@@ -58,6 +58,7 @@ class ReaderActivity : ComponentActivity() {
 
     private sealed interface BoundaryPrompt {
         data class PrevVolume(val folder: Entry) : BoundaryPrompt
+        data class NextVolume(val folder: Entry) : BoundaryPrompt
         data object NoPrev : BoundaryPrompt
     }
 
@@ -103,6 +104,20 @@ class ReaderActivity : ComponentActivity() {
                     },
                 )
                 when (val bp = boundaryPrompt) {
+                    is BoundaryPrompt.NextVolume -> AlertDialog(
+                        onDismissRequest = { boundaryPrompt = null },
+                        confirmButton = {
+                            TextButton(onClick = {
+                                boundaryPrompt = null
+                                goNextVolume(bp.folder)
+                            }) { Text("다음 권 보기") }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { boundaryPrompt = null }) { Text("취소") }
+                        },
+                        title = { Text("마지막 페이지입니다") },
+                        text = { Text("‘${bp.folder.name}’ 으로 이동할까요?") },
+                    )
                     is BoundaryPrompt.PrevVolume -> AlertDialog(
                         onDismissRequest = { boundaryPrompt = null },
                         confirmButton = {
@@ -337,7 +352,7 @@ class ReaderActivity : ComponentActivity() {
         rolling = true
         lifecycleScope.launch {
             try {
-                val cur = session ?: run { finish(); return@launch }
+                if (session == null) { finish(); return@launch }
                 val target = runCatching { adjacentFolder(forward) }.getOrNull()
 
                 if (!forward) {
@@ -350,14 +365,21 @@ class ReaderActivity : ComponentActivity() {
                     toast(getString(R.string.last_folder))
                     return@launch
                 }
-                app.sessions.upsert(cur.copy(finished = true, pageIndex = (cur.pageCount - 1).coerceAtLeast(0)))
-                source?.close()
-                SessionCache.clear(this@ReaderActivity, cur.id)
-                openFolder(target, atEnd = false)
+                boundaryPrompt = BoundaryPrompt.NextVolume(target)
             } finally {
                 rolling = false
             }
         }
+    }
+
+    /** 확인 후 다음 권으로: 현재 세션을 '완료' 로 옮기고 캐시를 정리한 뒤 새 폴더를 연다. */
+    private fun goNextVolume(folder: Entry) {
+        val cur = session ?: return
+        app.sessions.upsert(cur.copy(finished = true, pageIndex = (cur.pageCount - 1).coerceAtLeast(0)))
+        source?.close()
+        SessionCache.clear(this, cur.id)
+        rolling = true          // onDestroy 에서 source 를 다시 닫지 않도록
+        openFolder(folder, atEnd = false)
     }
 
     /**
