@@ -12,6 +12,7 @@ import android.os.SystemClock
 import android.util.Log
 import android.view.MotionEvent
 import android.view.ViewConfiguration
+import android.view.animation.AccelerateInterpolator
 import com.eschao.android.widget.pageflip.PageFlip
 import java.util.concurrent.locks.ReentrantLock
 import javax.microedition.khronos.egl.EGLConfig
@@ -188,8 +189,9 @@ class PageFlipView(
     /**
      * fromRightEdge=true → 오른쪽에서 왼쪽으로 접기, false → 왼쪽에서 오른쪽으로 접기.
      *
-     * 손가락으로 끄는 것처럼 [SYNTH_DRAG_MS] 동안 천천히 끌어서 페이지 절반을 살짝 넘긴 뒤 놓는다.
-     * (예전엔 곧바로 끝까지 끌어버려 넘김 효과가 거의 안 보였다)
+     * 실제 책처럼 아래 모서리를 잡고 대각선 위로 휙 채듯이, [SYNTH_DRAG_MS] 동안 점점 빨라지며
+     * 페이지 절반을 넘긴 뒤 그 속도 그대로 놓는다. 나머지는 스크롤러가 같은 속도에서 감속하며
+     * 마무리하므로 중간에 멈칫하지 않는다.
      */
     private fun synthFlip(fromRightEdge: Boolean) {
         if (width == 0) return
@@ -197,19 +199,27 @@ class PageFlipView(
         settleFlip()
         if (pageFlip.isAnimating) return
 
-        val y = height / 2f
         val w = width.toFloat()
-        val from = if (fromRightEdge) w * 0.92f else w * 0.08f
-        val to = if (fromRightEdge) w * 0.40f else w * 0.60f   // 되돌림 임계(페이지 절반)를 넘긴 지점
-        downX = from; downY = y
-        fingerDown(from, y)
-        synthAnim = ValueAnimator.ofFloat(from, to).apply {
+        val h = height.toFloat()
+        val pageW = if (pageFlip.secondPage != null) w / 2 else w
+        val dx = pageW * 0.6f                          // 되돌림 임계(페이지 절반)를 넘기는 거리
+        val fromX = if (fromRightEdge) w * 0.97f else w * 0.03f
+        val toX = if (fromRightEdge) fromX - dx else fromX + dx
+        val fromY = h * 0.96f                          // 아래 모서리 근처를 잡고
+        val toY = fromY - dx * 0.35f                   // 비스듬히 들어 올린다
+        downX = fromX; downY = fromY
+        fingerDown(fromX, fromY)
+        synthAnim = ValueAnimator.ofFloat(0f, 1f).apply {
             duration = SYNTH_DRAG_MS
-            addUpdateListener { fingerMove(it.animatedValue as Float, y) }
+            interpolator = AccelerateInterpolator()    // t² : 끝 속도 = 2 × 거리 / 시간
+            addUpdateListener {
+                val f = it.animatedValue as Float
+                fingerMove(fromX + (toX - fromX) * f, fromY + (toY - fromY) * f)
+            }
             addListener(object : AnimatorListenerAdapter() {
                 override fun onAnimationEnd(animation: Animator) {
                     synthAnim = null
-                    fingerUp(to, y)          // 나머지 절반은 라이브러리 스크롤러가 duration 동안
+                    fingerUp(toX, toY, 2f * dx / SYNTH_DRAG_MS)
                 }
             })
             start()
@@ -253,9 +263,10 @@ class PageFlipView(
         }
     }
 
-    private fun fingerUp(x: Float, y: Float) {
+    /** velocityX(px/ms) > 0 이면 그 속도를 이어받아 감속하며 넘긴다 (합성 제스처용). */
+    private fun fingerUp(x: Float, y: Float, velocityX: Float = 0f) {
         if (pageFlip.isAnimating) return
-        pageFlip.onFingerUp(x.coerceIn(0f, width.toFloat()), y.coerceIn(0f, height.toFloat()), duration)
+        pageFlip.onFingerUp(x.coerceIn(0f, width.toFloat()), y.coerceIn(0f, height.toFloat()), duration, velocityX)
         lock.lock()
         try {
             if (render.onFingerUp()) requestRender()
@@ -324,8 +335,8 @@ class PageFlipView(
     }
 
     private companion object {
-        /** 탭·접힘 제스처로 넘길 때 합성 드래그에 쓰는 시간(ms). 길수록 넘어가는 게 잘 보인다. */
-        const val SYNTH_DRAG_MS = 420L
+        /** 탭·접힘 제스처로 넘길 때 모서리를 채어 올리는 시간(ms). 뒤따르는 감속 구간은 약 2배. */
+        const val SYNTH_DRAG_MS = 200L
     }
 
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {

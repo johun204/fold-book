@@ -1,20 +1,109 @@
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp" android:height="108dp"
     android:viewportWidth="108" android:viewportHeight="108">
+  <group android:pivotX="54" android:pivotY="54" android:scaleX="0.9" android:scaleY="0.9">
 
-    <!-- 펼친 책 : 왼쪽 페이지 -->
-    <path android:fillColor="#F4EFE3"
-        android:pathData="M54,35 C45,31 33,30 22,32 L22,74 C33,72 45,73 54,77 Z" />
-    <!-- 펼친 책 : 오른쪽 페이지 -->
-    <path android:fillColor="#FBF7EC"
-        android:pathData="M54,35 C63,31 75,30 86,32 L86,74 C75,72 63,73 54,77 Z" />
+    <!-- 펼친 갤럭시 폴드 본체 -->
+    <path android:fillColor="#1C1D29"
+        android:pathData="M28,29 H80 A4.5,4.5 0 0 1 84.5,33.5 V74.5 A4.5,4.5 0 0 1 80,79 H28 A4.5,4.5 0 0 1 23.5,74.5 V33.5 A4.5,4.5 0 0 1 28,29 Z" />
 
-    <!-- 가운데 접힌 선(책등 = 폴드 힌지) -->
-    <path android:fillColor="#3E52C8" android:pathData="M51,33 h6 v46 h-6 z" />
+    <!-- ===== 오른쪽 화면 : 만화 한 페이지 ===== -->
+    <path android:fillColor="#FFFFFF" android:pathData="M54,31.5 H82 V76.5 H54 Z" />
 
-    <!-- 넘어가는 오른쪽 페이지 모서리 -->
-    <path android:fillColor="#DCD3BC"
-        android:pathData="M86,58 L86,74 C79,72 72,72 66,73 C77,71 83,66 86,58 Z" />
-    <path android:fillColor="#FFFFFF"
-        android:pathData="M86,55 C86,55 86,68 78,73 C83,66 82,60 86,55 Z" />
+    <!-- 1컷 : 말풍선 + 효과선 -->
+    <path android:fillColor="#FFFFFF" android:strokeColor="#16161C" android:strokeWidth="1.1"
+        android:pathData="M57,34 H79.5 V46.5 H57 Z" />
+    <path android:strokeColor="#16161C" android:strokeWidth="0.7" android:strokeLineCap="round"
+        android:pathData="M71.5,36.8 H78 M73.5,39.2 H78 M70.5,41.6 H78 M74,44 H78" />
+    <path android:fillColor="#FFFFFF" android:strokeColor="#16161C" android:strokeWidth="0.8"
+        android:pathData="M64,36.3 C67.4,36.3 69.6,38.1 69.6,40.2 C69.6,42.3 67.6,44 64.8,44.1 L66.6,46 L62.7,44 C60.2,43.7 58.5,42.1 58.5,40.2 C58.5,38.1 60.7,36.3 64,36.3 Z" />
+    <path android:strokeColor="#16161C" android:strokeWidth="0.6" android:strokeLineCap="round"
+        android:pathData="M61.3,39.4 H66.8 M61.3,41.2 H65.4" />
+
+    <!-- 2컷 : 큰 눈 (사선 칸) -->
+    <path android:fillColor="#FFFFFF" android:strokeColor="#16161C" android:strokeWidth="1.1"
+        android:pathData="M57,48.5 H79.5 V55.5 L57,60 Z" />
+    <group>
+        <clip-path android:pathData="M57,48.5 H79.5 V55.5 L57,60 Z" />
+        <path android:strokeColor="#16161C" android:strokeWidth="1.3" android:strokeLineCap="round"
+            android:pathData="M61.5,53.8 Q67.5,48.9 74,53" />
+        <path android:strokeColor="#16161C" android:strokeWidth="0.6" android:strokeLineCap="round"
+            android:pathData="M63.5,56 Q67.5,57.4 71.5,55.2" />
+        <path android:fillColor="#16161C"
+            android:pathData="M67.6,51.3 A2.7,2.7 0 1 1 67.59,51.3 Z" />
+        <path android:fillColor="#FFFFFF"
+            android:pathData="M68.6,52.1 A0.9,0.9 0 1 1 68.59,52.1 Z" />
+    </group>
+
+    <!-- 3컷 : 집중선 + 스크린톤 -->
+    <path android:fillColor="#FFFFFF" android:strokeColor="#16161C" android:strokeWidth="1.1"
+        android:pathData="M57,62 L79.5,57.5 V74 H57 Z" />
+    <group>
+        <clip-path android:pathData="M57,62 L79.5,57.5 V74 H57 Z" />
+        <path android:fillColor="#16161C"
+            android:pathData="M67,62.2 H69 L68.6,68.2 H67.4 Z M68,69.2 A1,1 0 1 1 67.99,69.2 Z M87.8,67.2 L87.6,68.7 L73.8,66.7 Z M86.5,73.3 L85.9,74.7 L74.7,69.1 Z M83.4,78.7 L82.4,79.9 L72.0,69.8 Z M78.8,82.9 L77.4,83.7 L71.9,73.1 Z M73.0,85.5 L71.5,85.8 L69.3,72.5 Z M66.8,86.2 L65.3,86.0 L67.3,72.2 Z M60.7,84.9 L59.3,84.3 L64.9,73.1 Z M55.3,81.8 L54.1,80.8 L64.2,70.4 Z M51.1,77.2 L50.3,75.8 L60.9,70.3 Z M48.5,71.4 L48.2,69.9 L61.5,67.7 Z M47.8,65.2 L48.0,63.7 L61.8,65.7 Z M49.1,59.1 L49.7,57.7 L60.9,63.3 Z M52.2,53.7 L53.2,52.5 L63.6,62.6 Z M56.8,49.5 L58.2,48.7 L63.7,59.3 Z M62.6,46.9 L64.1,46.6 L66.3,59.9 Z M68.8,46.2 L70.3,46.4 L68.3,60.2 Z M74.9,47.5 L76.3,48.1 L70.7,59.3 Z M80.3,50.6 L81.5,51.6 L71.4,62.0 Z M84.5,55.2 L85.3,56.6 L74.7,62.1 Z M87.1,61.0 L87.4,62.5 L74.1,64.7 Z" />
+    </group>
+
+    <!-- ===== 왼쪽 화면 ===== -->
+    <!-- 넘김으로 드러나는 다음 페이지 -->
+    <path android:fillColor="#FFFFFF" android:pathData="M26,31.5 H54 V76.5 H26 Z" />
+    <path android:fillColor="#C9CBD6" android:strokeColor="#16161C" android:strokeWidth="1.1"
+        android:pathData="M28.5,56 H51 V74 H28.5 Z" />
+
+    <!-- 지금 넘어가고 있는 페이지 (접힌 모서리 밖 부분) -->
+    <group>
+        <clip-path android:pathData="M26,31.5 H54 V76.5 H44 L26,46 Z" />
+        <path android:fillColor="#FFFFFF" android:pathData="M26,31.5 H54 V76.5 H26 Z" />
+
+        <!-- 1컷 : 뾰족머리 캐릭터 -->
+        <path android:fillColor="#FFFFFF" android:strokeColor="#16161C" android:strokeWidth="1.1"
+            android:pathData="M28.5,34 H51 V54.5 H28.5 Z" />
+        <path android:fillColor="#FFFFFF" android:strokeColor="#16161C" android:strokeWidth="0.9"
+            android:pathData="M33.8,43 V47.2 Q34.4,52 39.8,53.6 Q45.2,52 45.8,47.2 V43 Z" />
+        <path android:fillColor="#16161C"
+            android:pathData="M32.4,47.5 L31,41.5 L33.6,42.6 L32.6,37 L36.6,40 L37.4,35.2 L40.4,39.2 L42.8,35.4 L43.6,39.8 L47.6,37 L46.8,42.4 L49,41.6 L47.2,47.5 L45.8,43.6 L42.6,44.6 L41.8,42.4 L39.2,44.6 L37.4,42.6 L34,44.2 Z" />
+        <path android:fillColor="#16161C"
+            android:pathData="M37,46.3 A1,1.6 0 1 1 36.99,46.3 Z M42.6,46.3 A1,1.6 0 1 1 42.59,46.3 Z" />
+        <path android:fillColor="#FFFFFF"
+            android:pathData="M37.3,46.8 A0.35,0.35 0 1 1 37.29,46.8 Z M42.9,46.8 A0.35,0.35 0 1 1 42.89,46.8 Z" />
+        <path android:strokeColor="#16161C" android:strokeWidth="0.6" android:strokeLineCap="round"
+            android:pathData="M38.8,51.2 Q39.8,51.8 40.8,51.2" />
+
+        <!-- 2컷 -->
+        <path android:fillColor="#FFFFFF" android:strokeColor="#16161C" android:strokeWidth="1.1"
+            android:pathData="M28.5,56.5 H51 V74 H28.5 Z" />
+        <path android:strokeColor="#16161C" android:strokeWidth="0.7" android:strokeLineCap="round"
+            android:pathData="M38,60 H49 M40.5,62.5 H49 M36.5,65 H49" />
+
+        <!-- 접힌 종이가 드리우는 그림자 -->
+        <path android:fillColor="#000000" android:fillAlpha="0.28"
+            android:pathData="M26,46 Q42.4,51.9 54,61.6 Q52.2,71 44,76.5 Z" />
+    </group>
+
+    <!-- 힌지(접히는 선) 음영 -->
+    <path android:pathData="M49,31.5 H59 V76.5 H49 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient android:type="linear"
+                android:startX="49" android:startY="0" android:endX="59" android:endY="0">
+                <item android:offset="0" android:color="#00000000" />
+                <item android:offset="0.5" android:color="#33000000" />
+                <item android:offset="1" android:color="#00000000" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- 넘어가는 중인 모서리 : 종이 뒷면 -->
+    <path android:strokeColor="#16161C" android:strokeWidth="0.5"
+        android:pathData="M26,46 Q41.1,50.9 52.4,60.1 Q50.9,69.3 44,76.5 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient android:type="linear"
+                android:startX="35" android:startY="61" android:endX="52.4" android:endY="60.1">
+                <item android:offset="0" android:color="#FFCFD2DE" />
+                <item android:offset="0.55" android:color="#FFF4F4F8" />
+                <item android:offset="1" android:color="#FFFFFFFF" />
+            </gradient>
+        </aapt:attr>
+    </path>
+  </group>
 </vector>

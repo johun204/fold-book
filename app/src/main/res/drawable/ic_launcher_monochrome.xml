@@ -1,7 +1,22 @@
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp" android:height="108dp"
     android:viewportWidth="108" android:viewportHeight="108">
+  <group android:pivotX="54" android:pivotY="54" android:scaleX="0.9" android:scaleY="0.9">
+    <!-- 폴드 테두리 + 힌지 -->
+    <path android:strokeColor="#000000" android:strokeWidth="3"
+        android:pathData="M28,29 H80 A4.5,4.5 0 0 1 84.5,33.5 V74.5 A4.5,4.5 0 0 1 80,79 H28 A4.5,4.5 0 0 1 23.5,74.5 V33.5 A4.5,4.5 0 0 1 28,29 Z" />
+    <path android:fillColor="#000000" android:pathData="M53.2,29 H54.8 V79 H53.2 Z" />
+    <!-- 오른쪽 페이지 칸 -->
     <path android:fillColor="#000000"
-        android:pathData="M54,35 C45,31 33,30 22,32 L22,74 C33,72 45,73 54,77 Z M54,35 C63,31 75,30 86,32 L86,74 C75,72 63,73 54,77 Z" />
-    <path android:fillColor="#000000" android:pathData="M51,33 h6 v46 h-6 z" />
+        android:pathData="M57,34 H79.5 V46.5 H57 Z M57,48.5 H79.5 V55.5 L57,60 Z M57,62 L79.5,57.5 V74 H57 Z" />
+    <!-- 왼쪽 페이지 칸 (접힌 모서리 밖) -->
+    <group>
+        <clip-path android:pathData="M26,31.5 H54 V76.5 H44 L26,46 Z" />
+        <path android:fillColor="#000000"
+            android:pathData="M28.5,34 H51 V54.5 H28.5 Z M28.5,56.5 H51 V74 H28.5 Z" />
+    </group>
+    <!-- 넘어가는 모서리 -->
+    <path android:fillColor="#000000" android:fillAlpha="0.55"
+        android:pathData="M26,46 Q41.1,50.9 52.4,60.1 Q50.9,69.3 44,76.5 Z" />
+  </group>
 </vector>

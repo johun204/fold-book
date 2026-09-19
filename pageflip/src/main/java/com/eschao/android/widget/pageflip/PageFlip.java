@@ -22,6 +22,7 @@ import android.graphics.PointF;
 import android.opengl.GLUtils;
 import android.util.Log;
 import android.view.animation.AccelerateInterpolator;
+import android.view.animation.DecelerateInterpolator;
 import android.widget.Scroller;
 
 import static android.opengl.GLES20.GL_COLOR_BUFFER_BIT;
@@ -213,6 +214,9 @@ public class PageFlip {
 
     // use for flip animation
     private Scroller mScroller;
+    // 손을 뗄 때의 속도를 이어받아 감속하며 넘기는 스크롤러 (onFingerUp 의 velocityX 버전)
+    private Scroller mDragScroller;
+    private Scroller mFlingScroller;
     private Context mContext;
 
     // pages and page mode
@@ -235,7 +239,9 @@ public class PageFlip {
      */
     public PageFlip(Context context) {
         mContext = context;
-        mScroller = new Scroller(context);
+        mDragScroller = new Scroller(context);
+        mFlingScroller = new Scroller(context, new DecelerateInterpolator());
+        mScroller = mDragScroller;
         mFlipState = PageFlipState.END_FLIP;
         mIsVertical = false;
         mViewRect = new GLViewRect();
@@ -790,6 +796,16 @@ public class PageFlip {
      * @return true if animation is started or animation is not triggered
      */
     public boolean onFingerUp(float touchX, float touchY, int duration) {
+        return onFingerUp(touchX, touchY, duration, 0f);
+    }
+
+    /**
+     * 손을 뗄 때의 손가락 속도(velocityX, px/ms, 0 이면 기존 동작)를 그대로 이어받아 감속하며
+     * 넘긴다. 속도가 0 에서 다시 출발하지 않으므로 중간에 멈칫하는 느낌이 없다.
+     * 넘김 시간은 남은 거리에서 계산하고 duration 을 넘지 않는다.
+     */
+    public boolean onFingerUp(float touchX, float touchY, int duration,
+                              float velocityX) {
         touchX = mViewRect.toOpenGLX(touchX);
         touchY = mViewRect.toOpenGLY(touchY);
 
@@ -845,6 +861,14 @@ public class PageFlip {
         if (mFlipState == PageFlipState.FORWARD_FLIP ||
             mFlipState == PageFlipState.BACKWARD_FLIP ||
             mFlipState == PageFlipState.RESTORE_FLIP) {
+            mScroller = velocityX > 0 ? mFlingScroller : mDragScroller;
+            if (velocityX > 0) {
+                // 접힘 꼭지점은 손가락보다 1.2 배 빨리 움직인다(onFingerMove). 감속 보간은
+                // 시작 속도 = 2 × 거리 / 시간 이므로 그 속도에 맞는 시간을 구한다.
+                float v = velocityX * 1.2f;
+                int t = (int)(2 * Math.abs(end.x - start.x) / v);
+                duration = Math.max(120, Math.min(duration, t));
+            }
             mScroller.startScroll(start.x, start.y,
                                   end.x - start.x, end.y - start.y,
                                   duration);
