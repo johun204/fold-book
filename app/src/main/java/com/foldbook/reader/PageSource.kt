@@ -39,6 +39,12 @@ class PageSource(
 ) {
     private companion object {
         const val BACK = 2
+
+        /**
+         * 보정 강도(1~5) → S 커브를 몇 번 적용할지. 소수는 마지막 한 번을 그만큼만 섞는다.
+         * 1 번 적용이 예전 버전의 최대치였다 → 지금은 2 단계에 해당하고, 5 단계는 훨씬 세다.
+         */
+        val CURVE_STRENGTH = floatArrayOf(0f, 0.45f, 1f, 2f, 3.2f, 5f)
     }
 
     private val fwd = prefetchForward.coerceIn(1, 12)
@@ -227,7 +233,8 @@ class PageSource(
     /**
      * 스캔본 보정 LUT(밝기 0~255 → 보정 밝기). 두 단계다.
      *  1. 실제로 쓰인 밝기 구간(하위 1% ~ 상위 99%)을 0~255 로 편다 — 잿빛 배경이 하얘진다.
-     *  2. 강도만큼 S 커브(smoothstep)를 섞는다 — 흐린 선은 더 진해지고 종이 얼룩은 날아간다.
+     *  2. 강도만큼 S 커브(smoothstep)를 **거듭** 적용한다 — 흐린 선은 더 진해지고 종이 얼룩은
+     *     날아간다. 거듭할수록 중간 밝기가 흑/백으로 갈라져, 강도 5 는 거의 흑백 2 값에 가깝다.
      *
      * 밝기 분포는 가로줄 48 개만 훑어서 잰다. 색은 회색조로 뺀다([applyLut]).
      */
@@ -248,11 +255,16 @@ class PageSource(
         var hi = percentile(hist, (total * 0.99f).toInt())
         if (hi - lo < 16) { lo = 0; hi = 255 }       // 거의 단색 = 펴지 않고 회색조만
         val span = (hi - lo).toFloat()
-        val s = (level.coerceIn(1, 5)) / 5f          // S 커브를 섞는 비율
+        val strength = CURVE_STRENGTH[level.coerceIn(1, CURVE_STRENGTH.size - 1)]
         return IntArray(256) { v ->
-            val t = ((v - lo) / span).coerceIn(0f, 1f)
-            val curved = t + s * (t * t * (3 - 2 * t) - t)
-            (curved * 255f).toInt().coerceIn(0, 255)
+            var t = ((v - lo) / span).coerceIn(0f, 1f)
+            var left = strength
+            while (left > 0f) {
+                val w = minOf(1f, left)             // 남은 강도만큼만 섞는다(소수점 단계)
+                t += w * (t * t * (3 - 2 * t) - t)
+                left -= w
+            }
+            (t * 255f).toInt().coerceIn(0, 255)
         }
     }
 

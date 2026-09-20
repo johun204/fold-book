@@ -119,7 +119,7 @@ fun SettingsScreen(app: App) {
             Divider()
             Section("스캔 보정 (기본값)")
             Text(
-                "흐린 흑백 스캔 또렷하게 — ${'$'}{Prefs.enhanceLabel(enhance.roundToInt())}",
+                "흐린 흑백 스캔 또렷하게 — ${Prefs.enhanceLabel(enhance.roundToInt())}",
                 style = MaterialTheme.typography.bodyLarge,
             )
             Slider(

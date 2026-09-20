@@ -270,7 +270,7 @@ private fun ViewerSettingsSheet(
             Cap("스캔 보정 (이 책)")
             var level by remember(enhance) { mutableFloatStateOf(enhance.toFloat()) }
             Text(
-                "흐린 흑백 스캔 또렷하게 — ${'$'}{Prefs.enhanceLabel(level.roundToInt())}",
+                "흐린 흑백 스캔 또렷하게 — ${Prefs.enhanceLabel(level.roundToInt())}",
                 style = MaterialTheme.typography.bodyLarge,
             )
             Slider(

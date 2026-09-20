@@ -89,7 +89,8 @@ AGP 8.7.3 / Kotlin 2.1.0 / Gradle 8.14.3 / compileSdk 35 / minSdk 26.
   `PageImageProvider.setSpread` → `PageSource.setAlign` 으로 전달하고, 정렬이 바뀌면 다시 디코드한다.
 - **스캔 보정**(강도 0~5. 책마다 `Session.enhanceLevel`, 기본값은 설정 탭 `Prefs.enhanceLevel`):
   가로줄 48개로 밝기 히스토그램을 만들어 1%~99% 구간을 0~255 로 펴고, 강도만큼 S 커브(smoothstep)를
-  섞은 256칸 LUT 을 만든다(`PageSource.toneCurve`). 적용은 가로줄 한 줄씩(`applyLut`) 이라 여분 메모리가 없다.
+  **거듭** 적용한 256칸 LUT 을 만든다(`PageSource.toneCurve`, `CURVE_STRENGTH` = 적용 횟수 0.45~5).
+  거듭할수록 중간 밝기가 흑/백으로 갈라진다(5 단계는 거의 2 값). 적용은 가로줄 한 줄씩(`applyLut`) 이라 여분 메모리가 없다.
   회색조로 바뀌므로 누런 기·색 얼룩도 사라진다.
 - **이어보기 즉시 열기**(`reader/SessionManifest`): 세션 캐시에 이미지 목록·스캔본 크기를 `manifest.json` 으로
   저장해, 앱을 껐다 켠 뒤에도 **네트워크 조회 없이** 바로 리더로 진입하고 백그라운드에서 목록을 대조한다.

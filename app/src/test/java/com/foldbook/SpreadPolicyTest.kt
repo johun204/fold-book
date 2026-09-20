@@ -61,7 +61,7 @@ class SpreadPolicyTest {
         val idx = pages.indices.filter { pages[it].entryId == entryId }
         assertEquals(2, idx.size)
         assertEquals(
-            "스프레드 두 반쪽이 같은 페어에 있어야 한다: ${'$'}{pages.map { it.entryId + it.half }}",
+            "스프레드 두 반쪽이 같은 페어에 있어야 한다: ${pages.map { it.entryId + it.half }}",
             pairOf(idx[0], pages.size, rtl),
             pairOf(idx[1], pages.size, rtl),
         )
