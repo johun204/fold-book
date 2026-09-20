@@ -28,6 +28,10 @@ public final class ShadowColor {
     float endColor;
     float endAlpha;
 
+    // 설정된 원래 알파. setAlphaScale 로 흐리게 만든 뒤에도 기준값이 남아 있어야 한다.
+    private float mSrcStartAlpha;
+    private float mSrcEndAlpha;
+
     /**
      * Default constructor
      */
@@ -72,5 +76,23 @@ public final class ShadowColor {
         this.startAlpha = startAlpha;
         this.endColor = endColor;
         this.endAlpha = endAlpha;
+        this.mSrcStartAlpha = startAlpha;
+        this.mSrcEndAlpha = endAlpha;
+    }
+
+    /**
+     * 원래 알파에 [0 .. 1] 배율을 곱한다. 넘김이 끝나갈 때 그림자를 서서히 걷어내는 용도.
+     *
+     * @param scale 알파 배율
+     */
+    void setAlphaScale(float scale) {
+        if (scale < 0) {
+            scale = 0;
+        }
+        else if (scale > 1) {
+            scale = 1;
+        }
+        startAlpha = mSrcStartAlpha * scale;
+        endAlpha = mSrcEndAlpha * scale;
     }
 }

@@ -90,6 +90,12 @@ public class PageFlip {
      */
     private final static float MAX_DRAG_WIDTH_RATIO = 1.9f;
 
+    /**
+     * 접힘 밑동이 반대쪽 가장자리에서 이 비율(페이지 폭 기준) 안으로 들어오면 그림자가
+     * 옅어지기 시작한다.
+     */
+    private final static float SHADOW_FADE_WIDTH_RATIO = 0.3f;
+
     // folder page shadow color buffer size
     private final static int FOLD_TOP_EDGE_SHADOW_VEX_COUNT = 22;
 
@@ -1014,6 +1020,8 @@ public class PageFlip {
                 float x = (mYFoldP1.y - diagonalP.y) * mKValue + r;
                 isAnimating = x > (diagonalP.x - originP.x);
             }
+
+            fadeShadowNearEnd();
         }
 
         // animation is stopped
@@ -1229,12 +1237,33 @@ public class PageFlip {
             limitFoldXInDoublePage();
         }
 
+        fadeShadowNearEnd();
+
         if (mIsVertical) {
             computeVertexesWhenVertical();
         }
         else {
             computeVertexesWhenSlope();
         }
+    }
+
+    /**
+     * 접힘 밑동이 반대쪽 가장자리(양면 모드에서는 스파인)에 다가갈수록 접힘 그림자를 서서히
+     * 지운다.
+     *
+     * <p>양면 모드에서 넘김이 끝나는 순간 접힘은 스파인에 붙어 있고, 그 자리에 짙은 그림자가
+     * 남은 채로 애니메이션이 끝난다. 다음 프레임은 그림자가 없는 정지 화면이라 가운데 음영이
+     * 번쩍 사라지는 것처럼 보였다. 끝나기 전에 미리 옅어지게 해서 이어지게 만든다.</p>
+     */
+    private void fadeShadowNearEnd() {
+        final Page page = mPages[FIRST_PAGE];
+        final float fadeWidth = page.width * SHADOW_FADE_WIDTH_RATIO;
+        float scale = 1f;
+        if (fadeWidth > 0) {
+            scale = Math.abs(mXFoldP0.x - page.diagonalP.x) / fadeWidth;
+        }
+        mFoldEdgesShadow.mColor.setAlphaScale(scale);
+        mFoldBaseShadow.mColor.setAlphaScale(scale);
     }
 
     /**
