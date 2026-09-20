@@ -69,6 +69,7 @@ class ReaderActivity : ComponentActivity() {
     private var title by mutableStateOf("")
     private var rtl by mutableStateOf(false)
     private var curDirection by mutableStateOf(ReadingDirection.RTL)
+    private var enhanceScan by mutableStateOf(false)
     private var boundaryPrompt by mutableStateOf<BoundaryPrompt?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -92,6 +93,16 @@ class ReaderActivity : ComponentActivity() {
                     onJump = { n -> flip?.goTo(n) },
                     spreadMode = Prefs(this).spreadMode,
                     direction = curDirection,
+                    enhance = enhanceScan,
+                    onChangeEnhance = { on ->
+                        // 읽기 방향과 같이 이 책(폴더)에만 저장하고, 현재 페이지에서 다시 불러온다.
+                        session?.let {
+                            val ns = it.copy(enhanceScan = on)
+                            app.sessions.upsert(ns)
+                            session = ns
+                        }
+                        recreate()
+                    },
                     onChangeSpread = { m -> Prefs(this).spreadMode = m; recreate() },
                     onChangeDirection = { d ->
                         // 이 책(폴더)만의 방향으로 저장 — 설정 탭의 기본값은 건드리지 않는다.
@@ -298,7 +309,7 @@ class ReaderActivity : ComponentActivity() {
         val prefs = Prefs(this)
         val cacheDir = SessionCache.dir(this, s.id)
         val tapZone = if (isWideScreen()) prefs.tapZoneWide else prefs.tapZoneNarrow
-        val src = PageSource(backend, pages, cacheDir, lifecycleScope, prefs.prefetchForward)
+        val src = PageSource(backend, pages, cacheDir, lifecycleScope, prefs.prefetchForward, s.enhanceScan)
         val provider = PageImageProvider(src, rtl = readingRtl)
         val view = PageFlipView(this, provider, startPage, doubleMode, rtl = readingRtl, tapZone = tapZone)
         view.onBoundary = { fwd -> onBoundary(fwd) }
@@ -308,6 +319,7 @@ class ReaderActivity : ComponentActivity() {
         flip = view
         rtl = readingRtl
         curDirection = dir
+        enhanceScan = s.enhanceScan
         title = fName.ifBlank { s.folderName }
         totalPages = pages.size
         pageNum = startPage

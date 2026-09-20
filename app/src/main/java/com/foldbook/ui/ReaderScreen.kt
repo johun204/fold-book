@@ -35,6 +35,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -76,8 +77,10 @@ fun ReaderScreen(
     onJump: (Int) -> Unit,
     spreadMode: SpreadMode,
     direction: ReadingDirection,
+    enhance: Boolean,
     onChangeSpread: (SpreadMode) -> Unit,
     onChangeDirection: (ReadingDirection) -> Unit,
+    onChangeEnhance: (Boolean) -> Unit,
 ) {
     var chrome by remember { mutableStateOf(false) }
     var settings by remember { mutableStateOf(false) }
@@ -206,8 +209,10 @@ fun ReaderScreen(
         ViewerSettingsSheet(
             spread = spreadMode,
             dir = direction,
+            enhance = enhance,
             onSpread = onChangeSpread,
             onDir = onChangeDirection,
+            onEnhance = onChangeEnhance,
             onDismiss = { settings = false },
         )
     }
@@ -232,8 +237,10 @@ private fun PageChip(page: Int, total: Int, modifier: Modifier = Modifier) {
 private fun ViewerSettingsSheet(
     spread: SpreadMode,
     dir: ReadingDirection,
+    enhance: Boolean,
     onSpread: (SpreadMode) -> Unit,
     onDir: (ReadingDirection) -> Unit,
+    onEnhance: (Boolean) -> Unit,
     onDismiss: () -> Unit,
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
@@ -252,6 +259,22 @@ private fun ViewerSettingsSheet(
             Cap("읽기 방향 (이 책)")
             Opt("오른쪽 → 왼쪽 (일본 만화)", dir == ReadingDirection.RTL) { onDir(ReadingDirection.RTL) }
             Opt("왼쪽 → 오른쪽 (서양 만화·웹툰)", dir == ReadingDirection.LTR) { onDir(ReadingDirection.LTR) }
+            HorizontalDivider(Modifier.padding(vertical = 10.dp))
+            Cap("스캔 보정 (이 책)")
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("흐린 흑백 스캔 또렷하게", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        "잿빛 배경은 하얗게, 흐린 선은 진하게 보정합니다. 컬러 페이지는 회색조가 됩니다.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(checked = enhance, onCheckedChange = onEnhance)
+            }
             Spacer(Modifier.height(6.dp))
             Text(
                 "이 책에만 적용됩니다. 기본값은 설정 탭에서 바꿉니다. 변경하면 현재 페이지에서 다시 불러옵니다.",

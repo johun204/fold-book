@@ -38,6 +38,7 @@ abstract class PageRender(
     fun onSurfaceChanged() {
         val page = pageFlip.firstPage
         provider.setPageSize(page.width().toInt(), page.height().toInt())
+        provider.setSpread(this is Double)
         firstReal = false
         secondReal = false
     }
