@@ -90,6 +90,12 @@ public class PageFlip {
      */
     private final static float MAX_DRAG_WIDTH_RATIO = 1.9f;
 
+    /**
+     * 접힘 반지름이 페이지 폭의 이 비율 이상이면 주름 음영을 100% 로 준다. 그 아래로는
+     * 반지름에 비례해 줄여, 접힘이 얇아지는 넘김 끝에서는 음영이 사라진다.
+     */
+    private final static float CREASE_SHADOW_FULL_RADIUS_RATIO = 0.18f;
+
     // folder page shadow color buffer size
     private final static int FOLD_TOP_EDGE_SHADOW_VEX_COUNT = 22;
 
@@ -1238,6 +1244,30 @@ public class PageFlip {
     }
 
     /**
+     * 접힘 뒷면 주름 그림자의 세기 [0 .. 1].
+     *
+     * <p>뒷면 정점의 w 값(= sin(감김각))으로 그라데이션 텍스처를 찍어 접힌 자리에 주름 음영을
+     * 넣는다(fold_back_*_shader). 넘김이 끝나갈 때는 감김 반지름 mR 이 0 에 가까워져 음영이
+     * 스파인 자리의 얇은 띠로 뭉치는데, 그 상태로 애니메이션이 끝나고 다음 프레임은 음영이
+     * 없는 정지 화면이라 가운데가 번쩍이는 것처럼 보였다. 여백이 가운데 있던 시절에는 그
+     * 띠가 검은 여백 위에 얹혀 보이지 않았지만, 여백을 바깥으로 몰고 나서 페이지 그림 위에
+     * 그대로 드러났다.</p>
+     *
+     * <p>반지름이 작아질수록(= 접힘이 얇아질수록) 음영을 줄인다. 그라데이션은 0.5 아래에서
+     * 완전히 투명하므로, 끝에서는 자연히 음영이 사라진다.</p>
+     *
+     * @return 주름 음영 배율
+     */
+    private float creaseShadowScale() {
+        final float full = mPages[FIRST_PAGE].width * CREASE_SHADOW_FULL_RADIUS_RATIO;
+        if (full <= 0) {
+            return 1f;
+        }
+        float scale = mR / full;
+        return scale > 1f ? 1f : scale;
+    }
+
+    /**
      * 양면 모드에서 접힘선(xFoldP1)을 페이지 안(스파인)으로 제한하고, 접힘 원기둥을 다시 계산해
      * 페이지가 스파인을 축으로 계속 넘어가게 한다.
      *
@@ -1334,8 +1364,9 @@ public class PageFlip {
             float fz = (float) (mR * (1 - Math.cos(radius)));
 
             // compute vertex when it is curled
-            mFoldBackVertexes.addVertex(fx, dY, fz, sinR, coordX, cDY)
-                             .addVertex(fx, oY, fz, sinR, coordX, cOY);
+            float shadowR = sinR * creaseShadowScale();
+            mFoldBackVertexes.addVertex(fx, dY, fz, shadowR, coordX, cDY)
+                             .addVertex(fx, oY, fz, shadowR, coordX, cOY);
         }
 
         float tx0 = mTouchP.x;
@@ -1463,7 +1494,9 @@ public class PageFlip {
         // rotate degree -A, sin(-A) = -sin(A), cos(-A) = cos(A)
         float cx = x * cosA + y * sinA + oX;
         float cy = y * cosA - x * sinA + oY;
-        mFoldBackVertexes.addVertex(cx, cy, cz, (float)sinR, coordX, coordY);
+        mFoldBackVertexes.addVertex(cx, cy, cz,
+                                    (float)sinR * creaseShadowScale(),
+                                    coordX, coordY);
 
         // compute coordinates of fold shadow edge
         float sRadian = (sx - tX) / mR;
@@ -1506,7 +1539,9 @@ public class PageFlip {
         // rotate degree -A, sin(-A) = -sin(A), cos(-A) = cos(A)
         float cx = x * cosA + y * sinA + oX;
         float cy = y * cosA - x * sinA + oY;
-        mFoldBackVertexes.addVertex(cx, cy, cz, (float)sinR, coordX, coordY);
+        mFoldBackVertexes.addVertex(cx, cy, cz,
+                                    (float)sinR * creaseShadowScale(),
+                                    coordX, coordY);
     }
 
     /**
