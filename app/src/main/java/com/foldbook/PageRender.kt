@@ -217,8 +217,12 @@ abstract class PageRender(
 
             when (drawCommand) {
                 DRAW_MOVING_FRAME, DRAW_ANIMATING_FRAME -> {
-                    if (!first.isBackTextureSet)
-                        first.setBackTexture(provider.bitmap(if (first.isLeftPage) pageNo - 1 else pageNo + 2))
+                    if (!first.isBackTextureSet) {
+                        // 뒷면은 좌우 반전본으로 올린다 (PageImageProvider.backBitmap 주석 참고)
+                        val back = provider.backBitmap(if (first.isLeftPage) pageNo - 1 else pageNo + 2)
+                        first.setBackTexture(back)
+                        back.recycle()
+                    }
                     if (!first.isSecondTextureSet)
                         first.setSecondTexture(provider.bitmap(if (first.isLeftPage) pageNo - 2 else pageNo + 3))
                     pageFlip.drawFlipFrame()

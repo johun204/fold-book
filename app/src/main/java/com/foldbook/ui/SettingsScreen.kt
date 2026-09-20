@@ -52,7 +52,6 @@ fun SettingsScreen(app: App) {
     var dir by remember { mutableStateOf(prefs.direction) }
     var spread by remember { mutableStateOf(prefs.spreadMode) }
     var fitMode by remember { mutableStateOf(prefs.fitMode) }
-    var flipShadow by remember { mutableStateOf(prefs.flipShadow) }
     var fold by remember { mutableStateOf(prefs.foldFlip) }
     var split by remember { mutableStateOf(prefs.splitWideScans) }
     var analyzeRemote by remember { mutableStateOf(prefs.analyzeRemote) }
@@ -151,14 +150,6 @@ fun SettingsScreen(app: App) {
                     "덜 뜨지만, 네트워크 데이터와 메모리를 더 사용합니다. 네트워크가 느리면 6~10, " +
                     "데이터가 아까우면 2~3을 권장합니다. 세션이 끝나면 받아둔 파일은 자동으로 정리됩니다.",
             )
-
-            Divider()
-            Section("페이지 넘김 효과")
-            ToggleRow(
-                "접힘 그림자 그리기", flipShadow,
-                "넘어가는 종이의 접힌 부분에 생기는 그림자입니다. 켜면 종이 느낌이 살고, " +
-                    "끄면 그림자 없이 깔끔하게 넘어갑니다. 다음에 책을 열 때부터 적용됩니다.",
-            ) { flipShadow = it; prefs.flipShadow = it }
 
             Divider()
             Section("터치로 페이지 넘기기")

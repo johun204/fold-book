@@ -40,6 +40,19 @@ class PageImageProvider(val source: PageSource, private val rtl: Boolean = false
         return source.bitmap(i) ?: source.placeholder()
     }
 
+    /**
+     * 접힌 종이 **뒷면** 텍스처용 비트맵 (좌우 반전).
+     *
+     * eschao 는 뒷면을 '종이 좌표' 그대로 찍는다. 종이가 책등을 축으로 넘어가면 화면에서는
+     * 좌우가 뒤집혀 보이고, 넘김이 끝나 평평해진 순간의 그림이 정지 화면과 좌우가 반대가 된다.
+     * 가운데(책등) 정렬을 쓰기 전에는 여백이 좌우 대칭이라 티가 안 났지만, 여백을 바깥쪽으로
+     * 몰고 나서는 **넘김 중에는 검은 여백이 가운데**에 있다가 끝나는 순간 바깥으로 튀었다.
+     * 미리 좌우를 뒤집어 건네면 넘김이 끝난 모습이 정지 화면과 정확히 같아진다.
+     *
+     * 호출자는 GL 업로드가 끝나면 recycle 해야 한다.
+     */
+    fun backBitmap(libPage: Int): Bitmap = source.mirrored(bitmap(libPage))
+
     /** 해당 페이지의 실제 이미지가 준비됐는지 (회색 아님). */
     fun isReal(libPage: Int): Boolean {
         val i = idx(libPage)

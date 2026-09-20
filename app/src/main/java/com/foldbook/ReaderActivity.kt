@@ -314,10 +314,7 @@ class ReaderActivity : ComponentActivity() {
             prefs.prefetchForward, s.enhanceScan, prefs.fitMode,
         )
         val provider = PageImageProvider(src, rtl = readingRtl)
-        val view = PageFlipView(
-            this, provider, startPage, doubleMode,
-            rtl = readingRtl, tapZone = tapZone, shadow = prefs.flipShadow,
-        )
+        val view = PageFlipView(this, provider, startPage, doubleMode, rtl = readingRtl, tapZone = tapZone)
         view.onBoundary = { fwd -> onBoundary(fwd) }
         view.onPageSettled = { n -> pageNum = n; saveProgress(n) }
 

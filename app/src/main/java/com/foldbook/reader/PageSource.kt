@@ -6,6 +6,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.ColorMatrix
 import android.graphics.ColorMatrixColorFilter
+import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.RectF
 import com.foldbook.FitMode
@@ -84,6 +85,15 @@ class PageSource(
         }
         ensureWindow()
     }
+
+    /**
+     * 좌우를 뒤집은 사본. 접힌 종이의 뒷면 텍스처에 쓴다 (호출자가 GL 업로드 후 recycle).
+     */
+    fun mirrored(src: Bitmap): Bitmap =
+        Bitmap.createBitmap(
+            src, 0, 0, src.width, src.height,
+            Matrix().apply { preScale(-1f, 1f) }, true,
+        )
 
     fun placeholder(): Bitmap = gray
 

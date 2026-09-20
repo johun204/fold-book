@@ -28,11 +28,6 @@ class Prefs(context: Context) {
         }
         set(v) = sp.edit().putString(K_FIT, v.name.lowercase()).apply()
 
-    /** 페이지 넘길 때 접힘 그림자를 그릴지. 끄면 그림자 없이 깔끔하게 넘어간다. */
-    var flipShadow: Boolean
-        get() = sp.getBoolean(K_FLIP_SHADOW, true)
-        set(v) = sp.edit().putBoolean(K_FLIP_SHADOW, v).apply()
-
     var foldFlip: Boolean
         get() = sp.getBoolean(K_FOLD, false)
         set(v) = sp.edit().putBoolean(K_FOLD, v).apply()
@@ -72,7 +67,6 @@ class Prefs(context: Context) {
         const val K_DIR = "reading_direction"
         const val K_SPREAD = "spread_mode"
         const val K_FIT = "fit_mode"
-        const val K_FLIP_SHADOW = "flip_shadow"
         const val K_FOLD = "fold_flip"
         const val K_PREFETCH = "prefetch_forward"
         const val K_SPLIT = "split_wide_scans"
