@@ -39,6 +39,8 @@ class PageFlipView(
     private val rtl: Boolean = false,
     /** 단순 터치로 페이지를 넘기는 좌/우 가장자리 영역 비율. 0 이면 터치 넘김 끔(가운데 탭 = 오버레이). */
     var tapZone: Float = 0f,
+    /** 접힘 그림자를 그릴지 (설정). */
+    shadow: Boolean = true,
     private val duration: Int = 900,
 ) : GLSurfaceView(context), GLSurfaceView.Renderer {
 
@@ -80,6 +82,7 @@ class PageFlipView(
             .setPixelsOfMesh(10)
             .enableClickToFlip(false)          // 탭 넘김은 tapZone 으로 직접 처리
             .setMaskAlphaOfFold(235)           // 단면 모드 접힘 뒷면을 어둡게 → 뒷면에 다음 페이지 내용이 비치지 않도록
+            .enableShadow(shadow)
         pageFlip.enableAutoPage(doublePage)    // boolean 반환이라 체인 끝에서 분리 호출
 
         setEGLContextClientVersion(2)

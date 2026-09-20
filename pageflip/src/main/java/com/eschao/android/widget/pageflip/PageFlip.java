@@ -92,9 +92,13 @@ public class PageFlip {
 
     /**
      * 접힘 밑동이 반대쪽 가장자리에서 이 비율(페이지 폭 기준) 안으로 들어오면 그림자가
-     * 옅어지기 시작한다.
+     * 옅어지기 시작한다. 양면 모드에서 접힘이 스파인에 닿는 지점(0.9)부터 걷히기 시작해,
+     * 페이지가 다 넘어갈 무렵에는 이미 사라져 있다.
      */
-    private final static float SHADOW_FADE_WIDTH_RATIO = 0.3f;
+    private final static float SHADOW_FADE_WIDTH_RATIO = 0.9f;
+
+    /** 남은 거리에 비례해 시간을 줄여도 이보다 짧게는 넘기지 않는다(ms). */
+    private final static int MIN_FLIP_DURATION = 220;
 
     // folder page shadow color buffer size
     private final static int FOLD_TOP_EDGE_SHADOW_VEX_COUNT = 22;
@@ -231,6 +235,9 @@ public class PageFlip {
     // page which is receiving finger events, for example: finger down/move/up
     private Page mPages[];
     private int mPageMode;
+
+    // 접힘 그림자를 그릴지 (설정에서 끌 수 있다)
+    private boolean mIsShadowEnabled = true;
 
     // is clicking to flip page
     private boolean mIsClickToFlip;
@@ -440,6 +447,17 @@ public class PageFlip {
      */
     public PageFlip setMaskAlphaOfFold(int alpha) {
         mFoldBackVertexes.setMaskAlpha(alpha);
+        return this;
+    }
+
+    /**
+     * 접힘 그림자(밑동·가장자리)를 그릴지 정한다. 끄면 넘김이 그림자 없이 그려진다.
+     *
+     * @param enable true 면 그림자를 그린다
+     * @return self
+     */
+    public PageFlip enableShadow(boolean enable) {
+        mIsShadowEnabled = enable;
         return this;
     }
 
@@ -868,6 +886,16 @@ public class PageFlip {
             mFlipState == PageFlipState.BACKWARD_FLIP ||
             mFlipState == PageFlipState.RESTORE_FLIP) {
             mScroller = velocityX > 0 ? mFlingScroller : mDragScroller;
+            if (velocityX <= 0) {
+                // 남은 거리에 비례해 시간을 줄인다. 거의 다 넘긴 상태에서 손을 떼도 항상
+                // 같은 시간을 쓰는 바람에, 남은 조금을 느릿하게 마무리하며 멈칫해 보였다.
+                float full = 2 * page.width;
+                if (full > 0) {
+                    int t = (int)(duration * Math.abs(end.x - start.x) / full);
+                    duration = Math.max(MIN_FLIP_DURATION,
+                                        Math.min(duration, t));
+                }
+            }
             if (velocityX > 0) {
                 // 접힘 꼭지점은 손가락보다 1.2 배 빨리 움직인다(onFingerMove). 감속 보간은
                 // 시작 속도 = 2 × 거리 / 시간 이므로 그 속도에 맞는 시간을 구한다.
@@ -1256,11 +1284,18 @@ public class PageFlip {
      * 번쩍 사라지는 것처럼 보였다. 끝나기 전에 미리 옅어지게 해서 이어지게 만든다.</p>
      */
     private void fadeShadowNearEnd() {
-        final Page page = mPages[FIRST_PAGE];
-        final float fadeWidth = page.width * SHADOW_FADE_WIDTH_RATIO;
-        float scale = 1f;
-        if (fadeWidth > 0) {
-            scale = Math.abs(mXFoldP0.x - page.diagonalP.x) / fadeWidth;
+        float scale = 0f;
+        if (mIsShadowEnabled) {
+            final Page page = mPages[FIRST_PAGE];
+            final float fadeWidth = page.width * SHADOW_FADE_WIDTH_RATIO;
+            scale = 1f;
+            if (fadeWidth > 0) {
+                float t = Math.abs(mXFoldP0.x - page.diagonalP.x) / fadeWidth;
+                if (t > 1f) {
+                    t = 1f;
+                }
+                scale = t * t * (3 - 2 * t);    // smoothstep: 걷히는 게 눈에 띄지 않게
+            }
         }
         mFoldEdgesShadow.mColor.setAlphaScale(scale);
         mFoldBaseShadow.mColor.setAlphaScale(scale);
