@@ -8,6 +8,7 @@ import android.graphics.ColorMatrix
 import android.graphics.ColorMatrixColorFilter
 import android.graphics.Paint
 import android.graphics.RectF
+import com.foldbook.FitMode
 import com.foldbook.Half
 import com.foldbook.PageRef
 import com.foldbook.StorageBackend
@@ -26,6 +27,7 @@ import kotlin.math.abs
  * - 이미지가 페이지보다 좁아 여백이 생길 때, [setAlign] 으로 좌우 어디에 붙일지 정한다
  *   (양면 모드에서 가운데(책등)에 검은 여백이 생기지 않도록).
  * - [enhance] 면 흐린 흑백 스캔본을 자동 레벨 보정해서 선명하게 그린다.
+ * - [fit] 으로 이미지를 페이지에 맞추는 방식을 정한다(전부 보이기 / 가로 맞춤 / 세로 맞춤).
  * - RTL 이어도 텍스처는 반전하지 않는다(넘김 기하가 CurlEngine 에서 처리).
  */
 class PageSource(
@@ -35,6 +37,7 @@ class PageSource(
     private val scope: CoroutineScope,
     prefetchForward: Int = 5,
     private val enhance: Boolean = false,
+    private val fit: FitMode = FitMode.BOTH,
 ) {
     private companion object {
         const val BACK = 2
@@ -204,10 +207,17 @@ class PageSource(
         val out = Bitmap.createBitmap(pw, ph, Bitmap.Config.ARGB_8888)
         Canvas(out).apply {
             drawColor(Color.rgb(20, 20, 20))
-            val s = minOf(pw.toFloat() / bmp.width, ph.toFloat() / bmp.height)
+            val sw = pw.toFloat() / bmp.width
+            val sh = ph.toFloat() / bmp.height
+            val s = when (fit) {
+                FitMode.WIDTH -> sw
+                FitMode.HEIGHT -> sh
+                FitMode.BOTH -> minOf(sw, sh)
+            }
             val dw = bmp.width * s
             val dh = bmp.height * s
-            val l = (pw - dw) * alignX(index).coerceIn(0f, 1f)
+            // 남을 때만 책등 쪽에 붙이고, 넘쳐서 잘릴 때는 가운데를 보여준다.
+            val l = if (dw <= pw) (pw - dw) * alignX(index).coerceIn(0f, 1f) else (pw - dw) / 2f
             val t = (ph - dh) / 2f
             drawBitmap(bmp, null, RectF(l, t, l + dw, t + dh), paint)
         }

@@ -309,7 +309,10 @@ class ReaderActivity : ComponentActivity() {
         val prefs = Prefs(this)
         val cacheDir = SessionCache.dir(this, s.id)
         val tapZone = if (isWideScreen()) prefs.tapZoneWide else prefs.tapZoneNarrow
-        val src = PageSource(backend, pages, cacheDir, lifecycleScope, prefs.prefetchForward, s.enhanceScan)
+        val src = PageSource(
+            backend, pages, cacheDir, lifecycleScope,
+            prefs.prefetchForward, s.enhanceScan, prefs.fitMode,
+        )
         val provider = PageImageProvider(src, rtl = readingRtl)
         val view = PageFlipView(this, provider, startPage, doubleMode, rtl = readingRtl, tapZone = tapZone)
         view.onBoundary = { fwd -> onBoundary(fwd) }

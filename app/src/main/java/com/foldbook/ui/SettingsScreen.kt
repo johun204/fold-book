@@ -40,6 +40,7 @@ import com.foldbook.App
 import com.foldbook.BuildConfig
 import com.foldbook.Prefs
 import com.foldbook.ReadingDirection
+import com.foldbook.FitMode
 import com.foldbook.SpreadMode
 import kotlin.math.roundToInt
 
@@ -50,6 +51,7 @@ fun SettingsScreen(app: App) {
     val prefs = remember { Prefs(ctx) }
     var dir by remember { mutableStateOf(prefs.direction) }
     var spread by remember { mutableStateOf(prefs.spreadMode) }
+    var fitMode by remember { mutableStateOf(prefs.fitMode) }
     var fold by remember { mutableStateOf(prefs.foldFlip) }
     var split by remember { mutableStateOf(prefs.splitWideScans) }
     var analyzeRemote by remember { mutableStateOf(prefs.analyzeRemote) }
@@ -92,6 +94,25 @@ fun SettingsScreen(app: App) {
             }
             RadioRow("항상 양쪽 페이지", spread == SpreadMode.DOUBLE) {
                 spread = SpreadMode.DOUBLE; prefs.spreadMode = spread
+            }
+
+            Divider()
+            Section("이미지 맞춤 방식")
+            Desc(
+                "이미지 비율이 화면과 다를 때 어떻게 채울지 정합니다.\n" +
+                    "• 전부 보이기: 잘리는 곳 없이 전체를 보여주고 남는 쪽에 검은 여백을 둡니다.\n" +
+                    "• 가로 맞춤: 가로를 꽉 채웁니다. 세로로 긴 이미지는 위아래가 잘립니다.\n" +
+                    "• 세로 맞춤: 세로를 꽉 채웁니다. 가로로 넓은 이미지는 좌우가 잘립니다.\n" +
+                    "다음에 책을 열 때부터 적용됩니다."
+            )
+            RadioRow("전부 보이기 (잘림 없음)", fitMode == FitMode.BOTH) {
+                fitMode = FitMode.BOTH; prefs.fitMode = fitMode
+            }
+            RadioRow("가로 맞춤 (위아래 잘림)", fitMode == FitMode.WIDTH) {
+                fitMode = FitMode.WIDTH; prefs.fitMode = fitMode
+            }
+            RadioRow("세로 맞춤 (좌우 잘림)", fitMode == FitMode.HEIGHT) {
+                fitMode = FitMode.HEIGHT; prefs.fitMode = fitMode
             }
 
             Divider()

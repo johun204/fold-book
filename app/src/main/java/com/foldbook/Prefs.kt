@@ -19,6 +19,15 @@ class Prefs(context: Context) {
         }
         set(v) = sp.edit().putString(K_SPREAD, v.name.lowercase()).apply()
 
+    /** 이미지를 페이지에 맞추는 방식. 기본은 잘림 없이 전부 보이기. */
+    var fitMode: FitMode
+        get() = when (sp.getString(K_FIT, "both")) {
+            "width" -> FitMode.WIDTH
+            "height" -> FitMode.HEIGHT
+            else -> FitMode.BOTH
+        }
+        set(v) = sp.edit().putString(K_FIT, v.name.lowercase()).apply()
+
     var foldFlip: Boolean
         get() = sp.getBoolean(K_FOLD, false)
         set(v) = sp.edit().putBoolean(K_FOLD, v).apply()
@@ -57,6 +66,7 @@ class Prefs(context: Context) {
     private companion object {
         const val K_DIR = "reading_direction"
         const val K_SPREAD = "spread_mode"
+        const val K_FIT = "fit_mode"
         const val K_FOLD = "fold_flip"
         const val K_PREFETCH = "prefetch_forward"
         const val K_SPLIT = "split_wide_scans"

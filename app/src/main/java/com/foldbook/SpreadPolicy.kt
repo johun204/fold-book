@@ -5,6 +5,14 @@ import kotlinx.serialization.Serializable
 @Serializable
 enum class ReadingDirection { LTR, RTL }
 enum class SpreadMode { AUTO, SINGLE, DOUBLE }
+
+/**
+ * 이미지를 페이지 칸에 어떻게 맞출지.
+ * - [BOTH] 잘리는 곳 없이 전부 보이게 (남는 쪽에 검은 여백) — 기본값
+ * - [WIDTH] 가로를 꽉 채움 (세로가 넘치면 위아래가 잘림)
+ * - [HEIGHT] 세로를 꽉 채움 (가로가 넘치면 좌우가 잘림)
+ */
+enum class FitMode { BOTH, WIDTH, HEIGHT }
 enum class Half { WHOLE, LEFT, RIGHT }
 
 object SpreadPolicy {
