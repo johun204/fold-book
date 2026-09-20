@@ -45,7 +45,48 @@ class SpreadPolicyTest {
 
     @Test fun `single-page scan is never split`() {
         val pages = SpreadPolicy.expand(listOf(a), ReadingDirection.RTL, doubleMode = true, split = true, dims = dims)
-        assertEquals(listOf(Half.WHOLE), pages.map { it.half })
+        assertEquals(listOf(Half.WHOLE), pages.filter { it.entryId.isNotEmpty() }.map { it.half })
+    }
+
+    /**
+     * 라이브러리는 (홀,짝) 순번을 한 페어로 그린다. RTL 은 라이브러리 순번이 읽기 순번의 역순이라
+     * 전체 장수가 홀수면 페어가 한 칸 밀린다 = 스프레드의 두 반쪽이 서로 다른 페어로 찢어진다.
+     */
+    private fun pairOf(readingIndex: Int, count: Int, rtl: Boolean): Int {
+        val lib = if (rtl) count - readingIndex else readingIndex + 1
+        return (lib + 1) / 2
+    }
+
+    private fun assertSpreadInOnePair(pages: List<PageRef>, entryId: String, rtl: Boolean) {
+        val idx = pages.indices.filter { pages[it].entryId == entryId }
+        assertEquals(2, idx.size)
+        assertEquals(
+            "스프레드 두 반쪽이 같은 페어에 있어야 한다: ${'$'}{pages.map { it.entryId + it.half }}",
+            pairOf(idx[0], pages.size, rtl),
+            pairOf(idx[1], pages.size, rtl),
+        )
+    }
+
+    @Test fun `rtl keeps spread halves in one pair when a single follows`() {
+        // 스프레드 뒤에 낱장 -> 장수가 홀수가 되어 RTL 페어가 밀리던 경우
+        val pages = SpreadPolicy.expand(listOf(b, a), ReadingDirection.RTL, doubleMode = true, split = true, dims = dims)
+        assertSpreadInOnePair(pages, "b", rtl = true)
+    }
+
+    @Test fun `rtl keeps spread halves in one pair when a single precedes`() {
+        val pages = SpreadPolicy.expand(images, ReadingDirection.RTL, doubleMode = true, split = true, dims = dims)
+        assertSpreadInOnePair(pages, "b", rtl = true)
+    }
+
+    @Test fun `ltr keeps spread halves in one pair either way`() {
+        assertSpreadInOnePair(
+            SpreadPolicy.expand(listOf(b, a), ReadingDirection.LTR, doubleMode = true, split = true, dims = dims),
+            "b", rtl = false,
+        )
+        assertSpreadInOnePair(
+            SpreadPolicy.expand(images, ReadingDirection.LTR, doubleMode = true, split = true, dims = dims),
+            "b", rtl = false,
+        )
     }
 
     @Test fun `unknown dims never split (remote)`() {

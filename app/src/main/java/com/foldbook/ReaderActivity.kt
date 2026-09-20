@@ -48,6 +48,8 @@ class ReaderActivity : ComponentActivity() {
     private lateinit var backend: StorageBackend
     private lateinit var conn: Connection
     private var source: PageSource? = null
+    private var images: List<Entry> = emptyList()   // 폴더의 원본 이미지 목록 (재구성용)
+    private var doubleMode = false                  // 지금 리더가 만들어진 기준
     private var flip: PageFlipView? = null
 
     private var session: Session? = null
@@ -179,7 +181,11 @@ class ReaderActivity : ComponentActivity() {
         val wide = newConfig.orientation == Configuration.ORIENTATION_LANDSCAPE ||
             newConfig.smallestScreenWidthDp >= 600
         val prefs = Prefs(this)
-        flip?.onConfigChanged(wantDouble(prefs, wide, newConfig))
+        val want = wantDouble(prefs, wide, newConfig)
+        // 한쪽 ↔ 양쪽 보기가 바뀌면 페이지 구성(스프레드 짝맞춤용 빈 페이지)이 달라지므로
+        // 표면만 바꾸는 게 아니라 페이지 목록부터 다시 만든다.
+        if (ready && want != doubleMode) rebuildForSpread(want)
+        else flip?.onConfigChanged(want)
         flip?.tapZone = if (wide) prefs.tapZoneWide else prefs.tapZoneNarrow
     }
 
@@ -232,27 +238,29 @@ class ReaderActivity : ComponentActivity() {
         if (manifest != null && manifest.connectionId == conn.id && manifest.folderId == fId &&
             manifest.entries.isNotEmpty()
         ) {
-            val images = manifest.asEntries()
-            images.forEach { DimsCache.put("${conn.id}|${it.id}", manifest.dimOf(it.id)) }
-            val pages = SpreadPolicy.expand(images, dir, doubleMode, prefs.splitWideScans) { manifest.dimOf(it) }
+            val imgs = manifest.asEntries()
+            imgs.forEach { DimsCache.put("${conn.id}|${it.id}", manifest.dimOf(it.id)) }
+            images = imgs
+            val pages = SpreadPolicy.expand(imgs, dir, doubleMode, prefs.splitWideScans) { manifest.dimOf(it) }
             buildReader(pages, dir, doubleMode, s, fName, startEntryId = null, startAtEnd = false)
             refreshInBackground(fId, dir, doubleMode, prefs, cacheDir, manifest.entryIds())
             return
         }
 
         // --- 느린 경로: 폴더 조회 + 스캔본 분석 + 매니페스트 기록 ---
-        val images = try {
+        val imgs = try {
             backend.list(fId).filter { !it.isDir }
         } catch (e: Exception) {
             toast(getString(R.string.remote_failed, e.message ?: e.javaClass.simpleName)); finish(); return
         }
-        if (images.isEmpty()) { toast(getString(R.string.err_empty)); finish(); return }
+        if (imgs.isEmpty()) { toast(getString(R.string.err_empty)); finish(); return }
+        images = imgs
 
         val analyze = prefs.splitWideScans && (conn.type == ConnType.LOCAL || prefs.analyzeRemote)
-        val dimsMap = if (analyze) scanSizes(images) else emptyMap()
-        SessionManifestStore.save(cacheDir, conn.id, fId, dir, images, dimsMap)
+        val dimsMap = if (analyze) scanSizes(imgs) else emptyMap()
+        SessionManifestStore.save(cacheDir, conn.id, fId, dir, imgs, dimsMap)
 
-        val pages = SpreadPolicy.expand(images, dir, doubleMode, prefs.splitWideScans) { id -> dimsMap[id] }
+        val pages = SpreadPolicy.expand(imgs, dir, doubleMode, prefs.splitWideScans) { id -> dimsMap[id] }
         buildReader(pages, dir, doubleMode, s, fName, startEntryId, intent.getBooleanExtra(EXTRA_START_AT_END, false))
     }
 
@@ -320,6 +328,7 @@ class ReaderActivity : ComponentActivity() {
 
         source = src
         flip = view
+        this.doubleMode = doubleMode
         rtl = readingRtl
         curDirection = dir
         enhanceScan = s.enhanceScan
@@ -329,6 +338,31 @@ class ReaderActivity : ComponentActivity() {
         ready = true
 
         if (prefs.foldFlip) FoldGestureDetector(this) { view.flipForward() }.start()
+    }
+
+    /**
+     * 폴드/회전으로 한쪽 ↔ 양쪽 보기가 바뀌면 페이지 구성이 달라진다(양면 모드는 스프레드가
+     * 한 페어에 들어가도록 빈 페이지를 끼운다). 보던 이미지를 그대로 유지한 채 다시 만든다.
+     */
+    private fun rebuildForSpread(newDouble: Boolean) {
+        val s = session ?: return
+        val imgs = images
+        val src = source ?: return
+        if (imgs.isEmpty()) return
+
+        val prefs = Prefs(this)
+        val dir = s.directionOverride ?: prefs.direction
+        val keep = src.pages.getOrNull(pageNum - 1)?.entryId?.takeIf { it.isNotEmpty() }
+        val pages = SpreadPolicy.expand(imgs, dir, newDouble, prefs.splitWideScans) { id ->
+            DimsCache.get("${conn.id}|$id")
+        }
+
+        ready = false
+        flip = null
+        source = null
+        src.close()
+        restoredPage = 0
+        buildReader(pages, dir, newDouble, s, s.folderName, startEntryId = keep, startAtEnd = false)
     }
 
     private suspend fun scanSizes(images: List<Entry>): Map<String, Pair<Int, Int>?> {

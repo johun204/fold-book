@@ -36,7 +36,10 @@ object SpreadPolicy {
      *   (페이지 인덱스가 일정 → 이어보기 안정, 양면 모드에선 두 절반이 두 슬롯을 채워 스프레드로 보임).
      * - 절반 순서는 읽기 방향을 따른다(RTL=오른쪽 먼저). 뷰가 RTL 에서 좌우 반전(scaleX=-1)되므로
      *   이 순서 그대로가 화면에 맞다 (single·double 동일).
-     * - 양면 모드에선 스프레드가 (홀,짝) 페어에 통째로 들어가도록 필요하면 앞에 빈 페이지를 끼운다.
+     * - 양면 모드에선 스프레드가 한 페어에 통째로 들어가도록 필요하면 앞에 빈 페이지를 끼운다.
+     *   RTL 은 라이브러리 순번이 읽기 순번의 **역순**이라, 전체 장수가 홀수면 페어가 한 칸 밀려
+     *   스프레드의 두 반쪽이 서로 다른 페어로 찢어진다. 그래서 끝에 빈 페이지를 하나 더해
+     *   장수를 짝수로 맞춘다 (`spreadAlignX` 와 같은 '왼쪽 슬롯 = 라이브러리 홀수' 규칙).
      * - dims 가 null(원격 등 크기 미상)이면 스프레드 판정 불가 → 통짜.
      */
     fun expand(
@@ -60,6 +63,7 @@ object SpreadPolicy {
                 out += PageRef(e.id, e.name, Half.WHOLE)
             }
         }
+        if (doubleMode && dir == ReadingDirection.RTL && out.size % 2 == 1) out += BLANK
         return out
     }
 }
