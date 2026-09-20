@@ -35,9 +35,9 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.key
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -52,6 +52,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.foldbook.PageFlipView
+import com.foldbook.Prefs
 import com.foldbook.ReadingDirection
 import com.foldbook.SpreadMode
 import kotlin.math.roundToInt
@@ -73,19 +74,21 @@ fun ReaderScreen(
     title: String,
     rtl: Boolean,
     flipViewProvider: () -> View?,
+    /** 리더를 다시 만들 때마다 증가 — 이 값이 바뀌면 GL 뷰를 새로 붙인다. */
+    viewEpoch: Int,
     onBack: () -> Unit,
     onJump: (Int) -> Unit,
     spreadMode: SpreadMode,
     direction: ReadingDirection,
-    enhance: Boolean,
+    enhanceLevel: Int,
     onChangeSpread: (SpreadMode) -> Unit,
     onChangeDirection: (ReadingDirection) -> Unit,
-    onChangeEnhance: (Boolean) -> Unit,
+    onChangeEnhance: (Int) -> Unit,
 ) {
     var chrome by remember { mutableStateOf(false) }
     var settings by remember { mutableStateOf(false) }
 
-    LaunchedEffect(ready) {
+    LaunchedEffect(ready, viewEpoch) {
         (flipViewProvider() as? PageFlipView)?.onTap = { chrome = !chrome }
     }
 
@@ -100,10 +103,14 @@ fun ReaderScreen(
                 Text("책을 펼치는 중…", color = OnGlassDim, style = MaterialTheme.typography.labelLarge)
             }
         } else {
-            AndroidView(
-                factory = { flipViewProvider()!! },
-                modifier = Modifier.fillMaxSize(),
-            )
+            // 폴드/펼침으로 리더를 다시 만들면 viewEpoch 가 바뀐다. key 가 없으면 예전 GL 뷰가
+            // 그대로 붙어 있어(닫힌 PageSource 라) 검은 화면이 되거나 모드가 안 바뀐다.
+            key(viewEpoch) {
+                AndroidView(
+                    factory = { flipViewProvider()!! },
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
         }
 
         AnimatedVisibility(
@@ -209,7 +216,7 @@ fun ReaderScreen(
         ViewerSettingsSheet(
             spread = spreadMode,
             dir = direction,
-            enhance = enhance,
+            enhance = enhanceLevel,
             onSpread = onChangeSpread,
             onDir = onChangeDirection,
             onEnhance = onChangeEnhance,
@@ -237,10 +244,10 @@ private fun PageChip(page: Int, total: Int, modifier: Modifier = Modifier) {
 private fun ViewerSettingsSheet(
     spread: SpreadMode,
     dir: ReadingDirection,
-    enhance: Boolean,
+    enhance: Int,
     onSpread: (SpreadMode) -> Unit,
     onDir: (ReadingDirection) -> Unit,
-    onEnhance: (Boolean) -> Unit,
+    onEnhance: (Int) -> Unit,
     onDismiss: () -> Unit,
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
@@ -261,20 +268,25 @@ private fun ViewerSettingsSheet(
             Opt("왼쪽 → 오른쪽 (서양 만화·웹툰)", dir == ReadingDirection.LTR) { onDir(ReadingDirection.LTR) }
             HorizontalDivider(Modifier.padding(vertical = 10.dp))
             Cap("스캔 보정 (이 책)")
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text("흐린 흑백 스캔 또렷하게", style = MaterialTheme.typography.bodyLarge)
-                    Text(
-                        "잿빛 배경은 하얗게, 흐린 선은 진하게 보정합니다. 컬러 페이지는 회색조가 됩니다.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                Switch(checked = enhance, onCheckedChange = onEnhance)
-            }
+            var level by remember(enhance) { mutableFloatStateOf(enhance.toFloat()) }
+            Text(
+                "흐린 흑백 스캔 또렷하게 — ${'$'}{Prefs.enhanceLabel(level.roundToInt())}",
+                style = MaterialTheme.typography.bodyLarge,
+            )
+            Slider(
+                value = level,
+                onValueChange = { level = it },
+                onValueChangeFinished = { onEnhance(level.roundToInt()) },
+                valueRange = 0f..Prefs.ENHANCE_MAX.toFloat(),
+                steps = Prefs.ENHANCE_MAX - 1,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Text(
+                "잿빛 배경은 하얗게, 흐린 선은 진하게 보정합니다. 강하게 할수록 중간 밝기가 흑백으로 " +
+                    "갈라집니다. 컬러 페이지는 회색조가 됩니다.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             Spacer(Modifier.height(6.dp))
             Text(
                 "이 책에만 적용됩니다. 기본값은 설정 탭에서 바꿉니다. 변경하면 현재 페이지에서 다시 불러옵니다.",

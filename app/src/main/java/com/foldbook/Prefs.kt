@@ -5,6 +5,7 @@ import android.content.Context
 /** 읽기 설정. 단순 SharedPreferences. */
 class Prefs(context: Context) {
 
+
     private val sp = context.applicationContext.getSharedPreferences("foldbook", Context.MODE_PRIVATE)
 
     var direction: ReadingDirection
@@ -18,6 +19,11 @@ class Prefs(context: Context) {
             else -> SpreadMode.AUTO
         }
         set(v) = sp.edit().putString(K_SPREAD, v.name.lowercase()).apply()
+
+    /** 새로 여는 책에 적용할 스캔 보정 기본 강도 (0=끔, 1~5). */
+    var enhanceLevel: Int
+        get() = sp.getInt(K_ENHANCE, 0).coerceIn(0, ENHANCE_MAX)
+        set(v) = sp.edit().putInt(K_ENHANCE, v.coerceIn(0, ENHANCE_MAX)).apply()
 
     /** 이미지를 페이지에 맞추는 방식. 기본은 잘림 없이 전부 보이기. */
     var fitMode: FitMode
@@ -63,16 +69,30 @@ class Prefs(context: Context) {
 
     fun doublePage(wide: Boolean) = SpreadPolicy.doublePage(spreadMode, wide)
 
-    private companion object {
-        const val K_DIR = "reading_direction"
-        const val K_SPREAD = "spread_mode"
-        const val K_FIT = "fit_mode"
-        const val K_FOLD = "fold_flip"
-        const val K_PREFETCH = "prefetch_forward"
-        const val K_SPLIT = "split_wide_scans"
-        const val K_ANALYZE_REMOTE = "analyze_remote"
-        const val K_REMOTE_THUMBS = "remote_thumbnails"
-        const val K_TAPZONE_WIDE = "tap_zone_wide"
-        const val K_TAPZONE_NARROW = "tap_zone_narrow"
+    companion object {
+        /** 스캔 보정 최대 강도. */
+        const val ENHANCE_MAX = 5
+
+        /** 강도 설명 (0 = 끔). */
+        fun enhanceLabel(level: Int) = when (level.coerceIn(0, ENHANCE_MAX)) {
+            0 -> "끔"
+            1 -> "아주 약하게"
+            2 -> "약하게"
+            3 -> "보통"
+            4 -> "강하게"
+            else -> "아주 강하게"
+        }
+
+        private const val K_DIR = "reading_direction"
+        private const val K_SPREAD = "spread_mode"
+        private const val K_FIT = "fit_mode"
+        private const val K_ENHANCE = "enhance_level"
+        private const val K_FOLD = "fold_flip"
+        private const val K_PREFETCH = "prefetch_forward"
+        private const val K_SPLIT = "split_wide_scans"
+        private const val K_ANALYZE_REMOTE = "analyze_remote"
+        private const val K_REMOTE_THUMBS = "remote_thumbnails"
+        private const val K_TAPZONE_WIDE = "tap_zone_wide"
+        private const val K_TAPZONE_NARROW = "tap_zone_narrow"
     }
 }

@@ -71,7 +71,8 @@ class ReaderActivity : ComponentActivity() {
     private var title by mutableStateOf("")
     private var rtl by mutableStateOf(false)
     private var curDirection by mutableStateOf(ReadingDirection.RTL)
-    private var enhanceScan by mutableStateOf(false)
+    private var enhanceLevel by mutableIntStateOf(0)
+    private var viewEpoch by mutableIntStateOf(0)
     private var boundaryPrompt by mutableStateOf<BoundaryPrompt?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -95,11 +96,12 @@ class ReaderActivity : ComponentActivity() {
                     onJump = { n -> flip?.goTo(n) },
                     spreadMode = Prefs(this).spreadMode,
                     direction = curDirection,
-                    enhance = enhanceScan,
-                    onChangeEnhance = { on ->
+                    viewEpoch = viewEpoch,
+                    enhanceLevel = enhanceLevel,
+                    onChangeEnhance = { lv ->
                         // 읽기 방향과 같이 이 책(폴더)에만 저장하고, 현재 페이지에서 다시 불러온다.
                         session?.let {
-                            val ns = it.copy(enhanceScan = on)
+                            val ns = it.copy(enhanceLevel = lv)
                             app.sessions.upsert(ns)
                             session = ns
                         }
@@ -317,9 +319,10 @@ class ReaderActivity : ComponentActivity() {
         val prefs = Prefs(this)
         val cacheDir = SessionCache.dir(this, s.id)
         val tapZone = if (isWideScreen()) prefs.tapZoneWide else prefs.tapZoneNarrow
+        val level = s.enhanceLevel ?: prefs.enhanceLevel
         val src = PageSource(
             backend, pages, cacheDir, lifecycleScope,
-            prefs.prefetchForward, s.enhanceScan, prefs.fitMode,
+            prefs.prefetchForward, level, prefs.fitMode,
         )
         val provider = PageImageProvider(src, rtl = readingRtl)
         val view = PageFlipView(this, provider, startPage, doubleMode, rtl = readingRtl, tapZone = tapZone)
@@ -329,9 +332,10 @@ class ReaderActivity : ComponentActivity() {
         source = src
         flip = view
         this.doubleMode = doubleMode
+        viewEpoch++            // Compose 가 예전 GL 뷰를 버리고 새로 붙이도록
         rtl = readingRtl
         curDirection = dir
-        enhanceScan = s.enhanceScan
+        enhanceLevel = level
         title = fName.ifBlank { s.folderName }
         totalPages = pages.size
         pageNum = startPage
@@ -360,9 +364,10 @@ class ReaderActivity : ComponentActivity() {
         ready = false
         flip = null
         source = null
-        src.close()
         restoredPage = 0
         buildReader(pages, dir, newDouble, s, s.folderName, startEntryId = keep, startAtEnd = false)
+        // 예전 GL 뷰가 떨어져 나간 뒤에 닫는다 (먼저 닫으면 GL 스레드가 재활용된 비트맵을 쓴다)
+        window.decorView.post { src.close() }
     }
 
     private suspend fun scanSizes(images: List<Entry>): Map<String, Pair<Int, Int>?> {

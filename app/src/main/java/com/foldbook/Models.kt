@@ -44,7 +44,7 @@ data class Session(
     val updatedAt: Long = 0L,
     val finished: Boolean = false,      // 폴더 끝까지 다 봄 → 홈의 '완료' 그룹
     val directionOverride: ReadingDirection? = null,  // 이 책(폴더)만의 읽기 방향. null = 설정의 기본값
-    val enhanceScan: Boolean = false,   // 이 책(폴더)만의 스캔 보정 (흐린 흑백 스캔본 밝기 펴기)
+    val enhanceLevel: Int? = null,      // 이 책(폴더)만의 스캔 보정 강도(0=끔, 1~5). null = 설정의 기본값
 )
 
 /** 폴더 탐색 항목. */

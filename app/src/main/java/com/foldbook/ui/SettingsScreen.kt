@@ -52,6 +52,7 @@ fun SettingsScreen(app: App) {
     var dir by remember { mutableStateOf(prefs.direction) }
     var spread by remember { mutableStateOf(prefs.spreadMode) }
     var fitMode by remember { mutableStateOf(prefs.fitMode) }
+    var enhance by remember { mutableFloatStateOf(prefs.enhanceLevel.toFloat()) }
     var fold by remember { mutableStateOf(prefs.foldFlip) }
     var split by remember { mutableStateOf(prefs.splitWideScans) }
     var analyzeRemote by remember { mutableStateOf(prefs.analyzeRemote) }
@@ -114,6 +115,27 @@ fun SettingsScreen(app: App) {
             RadioRow("세로 맞춤 (좌우 잘림)", fitMode == FitMode.HEIGHT) {
                 fitMode = FitMode.HEIGHT; prefs.fitMode = fitMode
             }
+
+            Divider()
+            Section("스캔 보정 (기본값)")
+            Text(
+                "흐린 흑백 스캔 또렷하게 — ${'$'}{Prefs.enhanceLabel(enhance.roundToInt())}",
+                style = MaterialTheme.typography.bodyLarge,
+            )
+            Slider(
+                value = enhance,
+                onValueChange = { enhance = it },
+                onValueChangeFinished = { prefs.enhanceLevel = enhance.roundToInt() },
+                valueRange = 0f..Prefs.ENHANCE_MAX.toFloat(),
+                steps = Prefs.ENHANCE_MAX - 1,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Desc(
+                "스캔 상태가 나쁜 흑백 만화를 또렷하게 보정합니다. 밝기 분포를 재서 잿빛 배경은 하얗게, " +
+                    "흐린 선은 진하게 만듭니다(컬러 페이지는 회색조가 됩니다). 강하게 할수록 중간 밝기가 " +
+                    "흑백으로 갈라집니다.\n" +
+                    "새로 여는 책에 적용되는 기본값이고, 책마다 뷰어의 '뷰어 설정'에서 따로 바꿀 수 있습니다.",
+            )
 
             Divider()
             Section("좌우 양면 스캔본 분할")

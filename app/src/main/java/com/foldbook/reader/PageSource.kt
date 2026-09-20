@@ -4,8 +4,6 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
-import android.graphics.ColorMatrix
-import android.graphics.ColorMatrixColorFilter
 import android.graphics.Paint
 import android.graphics.RectF
 import com.foldbook.FitMode
@@ -26,7 +24,7 @@ import kotlin.math.abs
  * - 현재 페이지를 최우선으로 1장 디코드한 뒤에야 앞뒤 프리페치를 시작한다.
  * - 이미지가 페이지보다 좁아 여백이 생길 때, [setAlign] 으로 좌우 어디에 붙일지 정한다
  *   (양면 모드에서 가운데(책등)에 검은 여백이 생기지 않도록).
- * - [enhance] 면 흐린 흑백 스캔본을 자동 레벨 보정해서 선명하게 그린다.
+ * - [enhanceLevel] 이 0 보다 크면 흐린 흑백 스캔본을 회색조 + 톤커브로 또렷하게 만든다.
  * - [fit] 으로 이미지를 페이지에 맞추는 방식을 정한다(전부 보이기 / 가로 맞춤 / 세로 맞춤).
  * - RTL 이어도 텍스처는 반전하지 않는다(넘김 기하가 CurlEngine 에서 처리).
  */
@@ -36,7 +34,7 @@ class PageSource(
     private val cacheDir: File,
     private val scope: CoroutineScope,
     prefetchForward: Int = 5,
-    private val enhance: Boolean = false,
+    private val enhanceLevel: Int = 0,
     private val fit: FitMode = FitMode.BOTH,
 ) {
     private companion object {
@@ -201,8 +199,8 @@ class PageSource(
             bmp = cut
         }
 
+        val lut = if (enhanceLevel > 0) toneCurve(bmp, enhanceLevel) else null
         val paint = Paint(Paint.FILTER_BITMAP_FLAG)
-        if (enhance) paint.colorFilter = autoLevels(bmp)
 
         val out = Bitmap.createBitmap(pw, ph, Bitmap.Config.ARGB_8888)
         Canvas(out).apply {
@@ -222,17 +220,18 @@ class PageSource(
             drawBitmap(bmp, null, RectF(l, t, l + dw, t + dh), paint)
         }
         bmp.recycle()
+        if (lut != null) applyLut(out, lut)
         return out
     }
 
     /**
-     * 스캔본 보정: 색을 빼고(회색조), 실제로 쓰인 밝기 구간을 0~255 로 펴서 흐릿한 스캔의
-     * 잿빛 배경은 하얗게, 흐린 글씨·선은 진하게 만든다. 밝기 분포는 가로줄 몇 개만 훑어서 잰다.
+     * 스캔본 보정 LUT(밝기 0~255 → 보정 밝기). 두 단계다.
+     *  1. 실제로 쓰인 밝기 구간(하위 1% ~ 상위 99%)을 0~255 로 편다 — 잿빛 배경이 하얘진다.
+     *  2. 강도만큼 S 커브(smoothstep)를 섞는다 — 흐린 선은 더 진해지고 종이 얼룩은 날아간다.
      *
-     * ponytail: 곡선(감마)·언샵 마스크 없이 직선 레벨 보정만 한다. 픽셀을 복사하지 않고
-     * 그리는 김에 ColorFilter 로 처리하는 대신, 더 센 보정이 필요하면 LUT 방식으로 올려야 한다.
+     * 밝기 분포는 가로줄 48 개만 훑어서 잰다. 색은 회색조로 뺀다([applyLut]).
      */
-    private fun autoLevels(bmp: Bitmap): ColorMatrixColorFilter? {
+    private fun toneCurve(bmp: Bitmap, level: Int): IntArray? {
         val w = bmp.width
         val h = bmp.height
         if (w <= 0 || h <= 0) return null
@@ -242,31 +241,37 @@ class PageSource(
         for (r in 0 until rows) {
             val y = (r * h) / rows
             bmp.getPixels(buf, 0, w, 0, y, w, 1)
-            for (c in buf) {
-                val l = ((c shr 16 and 0xFF) * 77 + (c shr 8 and 0xFF) * 151 + (c and 0xFF) * 28) shr 8
-                hist[l]++
-            }
+            for (c in buf) hist[luma(c)]++
         }
         val total = rows * w
-        val lo = percentile(hist, (total * 0.03f).toInt())
-        val hi = percentile(hist, (total * 0.92f).toInt())
-        if (hi - lo < 16) return grayscaleOnly()               // 거의 단색 = 건드리지 않는다
-        val scale = 255f / (hi - lo)
-        val m = ColorMatrix(
-            floatArrayOf(
-                scale, 0f, 0f, 0f, -lo * scale,
-                0f, scale, 0f, 0f, -lo * scale,
-                0f, 0f, scale, 0f, -lo * scale,
-                0f, 0f, 0f, 1f, 0f,
-            )
-        )
-        val gray = ColorMatrix().apply { setSaturation(0f) }
-        m.preConcat(gray)
-        return ColorMatrixColorFilter(m)
+        var lo = percentile(hist, (total * 0.01f).toInt())
+        var hi = percentile(hist, (total * 0.99f).toInt())
+        if (hi - lo < 16) { lo = 0; hi = 255 }       // 거의 단색 = 펴지 않고 회색조만
+        val span = (hi - lo).toFloat()
+        val s = (level.coerceIn(1, 5)) / 5f          // S 커브를 섞는 비율
+        return IntArray(256) { v ->
+            val t = ((v - lo) / span).coerceIn(0f, 1f)
+            val curved = t + s * (t * t * (3 - 2 * t) - t)
+            (curved * 255f).toInt().coerceIn(0, 255)
+        }
     }
 
-    private fun grayscaleOnly() =
-        ColorMatrixColorFilter(ColorMatrix().apply { setSaturation(0f) })
+    /** 회색조로 바꾸면서 [lut] 을 적용한다. 가로줄 한 줄씩 처리해 여분 메모리를 쓰지 않는다. */
+    private fun applyLut(bmp: Bitmap, lut: IntArray) {
+        val w = bmp.width
+        val row = IntArray(w)
+        for (y in 0 until bmp.height) {
+            bmp.getPixels(row, 0, w, 0, y, w, 1)
+            for (i in 0 until w) {
+                val g = lut[luma(row[i])]
+                row[i] = (0xFF shl 24) or (g shl 16) or (g shl 8) or g
+            }
+            bmp.setPixels(row, 0, w, 0, y, w, 1)
+        }
+    }
+
+    private fun luma(c: Int) =
+        ((c shr 16 and 0xFF) * 77 + (c shr 8 and 0xFF) * 151 + (c and 0xFF) * 28) shr 8
 
     /** 누적 개수가 [n] 을 넘는 첫 밝기 값. */
     private fun percentile(hist: IntArray, n: Int): Int {

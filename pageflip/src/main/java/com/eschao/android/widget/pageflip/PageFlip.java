@@ -96,6 +96,12 @@ public class PageFlip {
      */
     private final static float CREASE_SHADOW_FULL_RADIUS_RATIO = 0.18f;
 
+    /**
+     * 양면 모드에서 접힘 밑동이 스파인에서 페이지 폭의 이 비율 안으로 들어오면 넘김을 끝낸다.
+     * (그 뒤 구간은 눈에 보이는 변화 없이 시간만 쓴다)
+     */
+    private final static float DOUBLE_FLIP_END_GAP_RATIO = 0.015f;
+
     // folder page shadow color buffer size
     private final static int FOLD_TOP_EDGE_SHADOW_VEX_COUNT = 22;
 
@@ -1303,7 +1309,11 @@ public class PageFlip {
         if (mMeshCount > len) {
             mMeshCount = (int)len;
         }
-        return mMeshCount > 0 && Math.abs(mXFoldP0.x - diagonalP.x) >= 2;
+        // 접힘 밑동이 스파인에 거의 닿으면 끝난 것으로 본다. 그 뒤로는 화면에서 움직이는 게
+        // 실선 같은 접힘뿐인데 스크롤러의 느린 꼬리가 한참 남아, 넘김 끝에서 잠깐 멈칫하는
+        // 것처럼 보였다.
+        final float endGap = Math.max(2f, page.width * DOUBLE_FLIP_END_GAP_RATIO);
+        return mMeshCount > 0 && Math.abs(mXFoldP0.x - diagonalP.x) >= endGap;
     }
 
     /**

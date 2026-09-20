@@ -62,6 +62,8 @@ AGP 8.7.3 / Kotlin 2.1.0 / Gradle 8.14.3 / compileSdk 35 / minSdk 26.
   `SYNTH_DRAG_MS` 동안 가속하며 페이지 절반을 넘긴 뒤, 그 속도를 `PageFlip.onFingerUp(…, velocityX)` 로
   넘겨 감속 스크롤러가 이어받는다(속도가 0 으로 떨어지지 않아 중간에 멈칫하지 않음). 손가락 드래그의
   놓기는 기존 스크롤러 그대로.
+- **양면 넘김은 접힘이 스파인에 거의 닿으면 끝낸다**(`DOUBLE_FLIP_END_GAP_RATIO` = 페이지 폭의 1.5%).
+  그 뒤 구간은 보이는 변화 없이 스크롤러의 느린 꼬리만 남아 넘김 끝에서 멈칫하는 것처럼 보였다.
 - **양면 모드에서 스파인을 넘어서는 오버드래그**도 손가락을 따라간다. 접힘선이 페이지 밖으로 나가면
   스파인을 축으로 계속 회전시킨다(`PageFlip.limitFoldXInDoublePage`, 애니메이션과 드래그 공용).
 - 단면(폴드 접힘) 모드에선 접힘 뒷면을 어둡게 처리해, 반대 방향으로 넘길 때 다음 페이지 내용이 뒷면에 비치지 않는다.
@@ -85,9 +87,10 @@ AGP 8.7.3 / Kotlin 2.1.0 / Gradle 8.14.3 / compileSdk 35 / minSdk 26.
 - **양면 모드의 여백은 바깥쪽에만**: 이미지가 페이지보다 좁으면 가운데(책등) 쪽에 딱 붙이고 남는 여백을
   화면 좌·우 끝으로 보낸다. 왼쪽 슬롯 = 라이브러리 홀수 페이지라는 규칙(`spreadAlignX`, 단위테스트 있음)을
   `PageImageProvider.setSpread` → `PageSource.setAlign` 으로 전달하고, 정렬이 바뀌면 다시 디코드한다.
-- **스캔 보정**(뷰어 설정, 이 책만 / `Session.enhanceScan`): 가로줄 48개를 훑어 밝기 히스토그램을 만들고
-  3%~92% 구간을 0~255 로 펴는 ColorMatrix 를 그릴 때 적용한다(회색조 + 레벨 보정). 흐린 흑백 스캔본의
-  잿빛 배경이 하얘지고 흐린 선이 진해진다. 픽셀 복사가 없어 메모리 비용이 없다.
+- **스캔 보정**(강도 0~5. 책마다 `Session.enhanceLevel`, 기본값은 설정 탭 `Prefs.enhanceLevel`):
+  가로줄 48개로 밝기 히스토그램을 만들어 1%~99% 구간을 0~255 로 펴고, 강도만큼 S 커브(smoothstep)를
+  섞은 256칸 LUT 을 만든다(`PageSource.toneCurve`). 적용은 가로줄 한 줄씩(`applyLut`) 이라 여분 메모리가 없다.
+  회색조로 바뀌므로 누런 기·색 얼룩도 사라진다.
 - **이어보기 즉시 열기**(`reader/SessionManifest`): 세션 캐시에 이미지 목록·스캔본 크기를 `manifest.json` 으로
   저장해, 앱을 껐다 켠 뒤에도 **네트워크 조회 없이** 바로 리더로 진입하고 백그라운드에서 목록을 대조한다.
 - 받은 파일은 세션 캐시(`cacheDir/sessions/<id>/`, 파일명 = entryId 해시), 세션 종료/삭제 시 삭제 + 시작 시
@@ -98,6 +101,8 @@ AGP 8.7.3 / Kotlin 2.1.0 / Gradle 8.14.3 / compileSdk 35 / minSdk 26.
   (`SpreadPolicy.expand`, 단위테스트 `pairOf`). 낱장과 양면 스캔이 섞인 폴더에서 스프레드가 찢어지지 않는다.
 - **폴드/회전으로 한쪽↔양쪽 보기가 바뀌면 페이지 목록부터 다시 만든다**(`ReaderActivity.rebuildForSpread`).
   빈 페이지 끼움이 모드마다 다르므로 표면만 바꾸면 스프레드 짝이 어긋난다. 보던 이미지는 유지.
+  새 GL 뷰는 `viewEpoch` 를 올려 Compose `key(viewEpoch)` 로 갈아끼운다(안 그러면 예전 뷰가 그대로
+  붙어 있어 펼쳐도 단면이거나 검은 화면). 예전 `PageSource` 는 뷰가 떨어진 뒤에 닫는다.
 - **폴드/펼침·회전**은 `configChanges` 로 Activity 재생성 없이, `PageFlipView.onConfigChanged` 가 표면만 다시
   잡아 단면↔양면까지 전환. `onDrawFrame` 은 재구성 중 예외를 삼킨다.
 - 구글 드라이브는 앱 시작 시 백그라운드로 토큰 + 최근 세션 폴더 목록을 미리 데워 첫 로딩을 줄인다.
