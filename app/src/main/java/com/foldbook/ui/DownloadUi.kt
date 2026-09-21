@@ -37,7 +37,7 @@ fun DownloadCard(d: DownloadState, modifier: Modifier = Modifier) {
         shape = MaterialTheme.shapes.large,
         tonalElevation = 3.dp,
         shadowElevation = 4.dp,
-        color = if (d.conflict != null) MaterialTheme.colorScheme.tertiaryContainer
+        color = if (d.conflict != null || d.paused) MaterialTheme.colorScheme.tertiaryContainer
         else MaterialTheme.colorScheme.surfaceContainerHigh,
     ) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -48,6 +48,7 @@ fun DownloadCard(d: DownloadState, modifier: Modifier = Modifier) {
                         d.error != null -> "다운로드 ${d.error}"
                         d.finished -> "다운로드 완료"
                         d.conflict != null -> "선택이 필요합니다"
+                        d.paused -> "일시중지 · Wi-Fi 끊김"
                         else -> "다운로드 중"
                     },
                     Modifier.weight(1f).padding(start = 10.dp),
@@ -69,7 +70,21 @@ fun DownloadCard(d: DownloadState, modifier: Modifier = Modifier) {
                 )
             }
 
-            if (!d.finished && d.conflict == null) {
+            if (d.paused) {
+                Text(
+                    "Wi-Fi 연결이 끊겨 ${d.done} / ${d.total} 에서 멈췄습니다. " +
+                        "Wi-Fi 에 다시 연결되면 이어서 받습니다.",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = { DownloadService.cancel(ctx) }) { Text("중단") }
+                    androidx.compose.material3.Button(
+                        onClick = { DownloadService.allowMetered(ctx) },
+                    ) { Text("모바일 데이터로 계속") }
+                }
+            }
+
+            if (!d.finished && d.conflict == null && !d.paused) {
                 Text(
                     if (d.total > 0) "${d.done} / ${d.total}" + (if (d.currentFile.isNotBlank()) " · ${d.currentFile}" else "")
                     else "목록 확인 중…",

@@ -341,7 +341,6 @@ class ReaderActivity : ComponentActivity() {
         pageNum = startPage
         ready = true
 
-        if (prefs.foldFlip) FoldGestureDetector(this) { view.flipForward() }.start()
     }
 
     /**

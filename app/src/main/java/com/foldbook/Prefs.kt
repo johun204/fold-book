@@ -20,6 +20,11 @@ class Prefs(context: Context) {
         }
         set(v) = sp.edit().putString(K_SPREAD, v.name.lowercase()).apply()
 
+    /** 파일 다운로드를 Wi-Fi 에서만 할지. 끄면 모바일 데이터로도 바로 받는다. */
+    var wifiOnlyDownload: Boolean
+        get() = sp.getBoolean(K_WIFI_ONLY, true)
+        set(v) = sp.edit().putBoolean(K_WIFI_ONLY, v).apply()
+
     /** 새로 여는 책에 적용할 스캔 보정 기본 강도 (0=끔, 1~5). */
     var enhanceLevel: Int
         get() = sp.getInt(K_ENHANCE, 0).coerceIn(0, ENHANCE_MAX)
@@ -33,10 +38,6 @@ class Prefs(context: Context) {
             else -> FitMode.BOTH
         }
         set(v) = sp.edit().putString(K_FIT, v.name.lowercase()).apply()
-
-    var foldFlip: Boolean
-        get() = sp.getBoolean(K_FOLD, false)
-        set(v) = sp.edit().putBoolean(K_FOLD, v).apply()
 
     /** 좌우 양면 스캔본(가로가 긴 이미지)을 반으로 나눠서 볼지. 끄면 통짜로 축소 표시. */
     var splitWideScans: Boolean
@@ -87,7 +88,7 @@ class Prefs(context: Context) {
         private const val K_SPREAD = "spread_mode"
         private const val K_FIT = "fit_mode"
         private const val K_ENHANCE = "enhance_level"
-        private const val K_FOLD = "fold_flip"
+        private const val K_WIFI_ONLY = "wifi_only_download"
         private const val K_PREFETCH = "prefetch_forward"
         private const val K_SPLIT = "split_wide_scans"
         private const val K_ANALYZE_REMOTE = "analyze_remote"

@@ -7,6 +7,8 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.net.Uri
 import android.os.Build
 import android.os.IBinder
@@ -21,6 +23,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
@@ -34,6 +37,8 @@ data class DownloadState(
     val roots: List<String> = emptyList(),
     /** 이 이름의 파일이 이미 있어 사용자 선택 대기 중(덮어쓰기/건너뛰기). null 이면 대기 아님. */
     val conflict: String? = null,
+    /** Wi-Fi 가 끊겨 일시중지 중 (다시 연결되면 자동으로 이어받는다). */
+    val paused: Boolean = false,
     val finished: Boolean = false,
     val error: String? = null,
 )
@@ -51,6 +56,7 @@ class DownloadService : Service() {
 
     private var pending: CompletableDeferred<Boolean>? = null
     private var overwriteAll: Boolean? = null   // null=미결정, true=모두 덮어쓰기, false=모두 건너뛰기
+    @Volatile private var allowMetered = false  // 모바일 데이터로도 받기 (사용자가 허용)
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -70,6 +76,10 @@ class DownloadService : Service() {
                 job?.cancel()
                 return START_NOT_STICKY
             }
+            ACTION_ALLOW_METERED -> {
+                allowMetered = true
+                return START_NOT_STICKY
+            }
             ACTION_RESOLVE -> {
                 val ow = intent.getBooleanExtra(EX_OVERWRITE, false)
                 if (intent.getBooleanExtra(EX_ALL, false)) overwriteAll = ow
@@ -86,6 +96,7 @@ class DownloadService : Service() {
         val names = intent.getStringArrayExtra(EX_NAMES) ?: emptyArray()
         val dirs = intent.getBooleanArrayExtra(EX_DIRS) ?: BooleanArray(ids.size)
         val label = intent.getStringExtra(EX_LABEL) ?: "다운로드"
+        allowMetered = intent.getBooleanExtra(EX_METERED, false)
         val rootNames = names.toList()
 
         state.value = DownloadState(label, 0, 0, roots = rootNames)
@@ -108,6 +119,7 @@ class DownloadService : Service() {
                 for (e in roots) copyInto(
                     applicationContext, dest, backend, e,
                     ask = { name -> askConflict(name) },
+                    awaitNetwork = { awaitNetwork() },
                     onLeaf = { name ->
                         done++
                         state.value = state.value?.copy(done = done, currentFile = name)
@@ -130,6 +142,30 @@ class DownloadService : Service() {
             }
         }
         return START_NOT_STICKY
+    }
+
+    /**
+     * Wi-Fi 전용인데 Wi-Fi 가 아니면(또는 연결이 끊겼으면) 다시 연결될 때까지 멈춘다.
+     * 사용자가 "모바일 데이터로 계속"을 고르면 [allowMetered] 가 켜져 바로 빠져나온다.
+     */
+    private suspend fun awaitNetwork() {
+        if (allowMetered || isUnmetered()) return
+        state.value = state.value?.copy(paused = true)
+        pushState()
+        while (!allowMetered && !isUnmetered()) {
+            currentCoroutineContext().ensureActive()
+            delay(1000)          // ponytail: 멈춰 있는 동안만 1초 폴링. 콜백 등록보다 단순하다.
+        }
+        state.value = state.value?.copy(paused = false)
+        pushState()
+    }
+
+    private fun isUnmetered(): Boolean = isUnmetered(this)
+
+    private fun pushState() {
+        state.value?.let {
+            pushNotif(notif(it.label, it.done, it.total, indeterminate = it.total == 0, conflict = it.conflict))
+        }
     }
 
     /** 이미 있는 파일 처리를 물어본다. overwriteAll 이 정해져 있으면 바로 그 값 사용. */
@@ -198,12 +234,24 @@ class DownloadService : Service() {
             Intent(this, DownloadService::class.java).setAction(ACTION_CANCEL),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
+        val meteredPi = PendingIntent.getService(
+            this, 2,
+            Intent(this, DownloadService::class.java).setAction(ACTION_ALLOW_METERED),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
         val b = NotificationCompat.Builder(this, CHANNEL)
             .setSmallIcon(android.R.drawable.stat_sys_download)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setContentIntent(openAppPi())
             .addAction(0, "취소", cancelPi)
+        if (state.value?.paused == true) {
+            b.setContentTitle("일시중지 · Wi-Fi 를 기다리는 중")
+                .setContentText("$done / $total · Wi-Fi 에 다시 연결되면 이어서 받습니다")
+                .setProgress(0, 0, false)
+                .addAction(0, "모바일 데이터로 계속", meteredPi)
+            return b.build()
+        }
         if (conflict != null) {
             b.setContentTitle("이미 있는 파일: $conflict")
                 .setContentText("앱을 열어 덮어쓰기 / 건너뛰기를 선택하세요")
@@ -233,6 +281,7 @@ class DownloadService : Service() {
         private const val NOTIF_ID = 42
         private const val ACTION_CANCEL = "com.foldbook.DOWNLOAD_CANCEL"
         private const val ACTION_RESOLVE = "com.foldbook.DOWNLOAD_RESOLVE"
+        private const val ACTION_ALLOW_METERED = "com.foldbook.DOWNLOAD_ALLOW_METERED"
         private const val EX_CONN = "conn"
         private const val EX_TREE = "tree"
         private const val EX_IDS = "ids"
@@ -241,8 +290,20 @@ class DownloadService : Service() {
         private const val EX_LABEL = "label"
         private const val EX_OVERWRITE = "overwrite"
         private const val EX_ALL = "all"
+        private const val EX_METERED = "metered"
 
-        fun start(ctx: Context, connId: String, tree: Uri, roots: List<Entry>, label: String) {
+        /** 지금 연결이 Wi-Fi(종량제 아님)인가. 연결이 아예 없으면 false. */
+        fun isUnmetered(ctx: Context): Boolean {
+            val cm = ctx.getSystemService(ConnectivityManager::class.java) ?: return true
+            val caps = cm.getNetworkCapabilities(cm.activeNetwork) ?: return false
+            return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
+        }
+
+        /** allowMetered=true 면 모바일 데이터에서도 멈추지 않는다. */
+        fun start(
+            ctx: Context, connId: String, tree: Uri, roots: List<Entry>, label: String,
+            allowMetered: Boolean,
+        ) {
             state.value = DownloadState(label, 0, 0, roots = roots.map { it.name })
             val i = Intent(ctx, DownloadService::class.java).apply {
                 putExtra(EX_CONN, connId)
@@ -251,6 +312,7 @@ class DownloadService : Service() {
                 putExtra(EX_NAMES, roots.map { it.name }.toTypedArray())
                 putExtra(EX_DIRS, roots.map { it.isDir }.toBooleanArray())
                 putExtra(EX_LABEL, label)
+                putExtra(EX_METERED, allowMetered)
             }
             ContextCompat.startForegroundService(ctx, i)
         }
@@ -265,6 +327,11 @@ class DownloadService : Service() {
                 Intent(ctx, DownloadService::class.java).setAction(ACTION_RESOLVE)
                     .putExtra(EX_OVERWRITE, overwrite).putExtra(EX_ALL, all),
             )
+        }
+
+        /** 일시중지 상태에서 모바일 데이터로 이어받기. */
+        fun allowMetered(ctx: Context) = runCatching {
+            ctx.startService(Intent(ctx, DownloadService::class.java).setAction(ACTION_ALLOW_METERED))
         }
 
         fun dismiss() { state.value = null }
@@ -283,14 +350,16 @@ private suspend fun copyInto(
     backend: StorageBackend,
     entry: Entry,
     ask: suspend (name: String) -> Boolean,
+    awaitNetwork: suspend () -> Unit,
     onLeaf: (name: String) -> Unit,
 ) {
     currentCoroutineContext().ensureActive()
+    awaitNetwork()
     if (entry.isDir) {
         val sub = dest.findFile(entry.name)?.takeIf { it.isDirectory }
             ?: dest.createDirectory(entry.name)
             ?: return
-        for (child in backend.list(entry.id)) copyInto(ctx, sub, backend, child, ask, onLeaf)
+        for (child in backend.list(entry.id)) copyInto(ctx, sub, backend, child, ask, awaitNetwork, onLeaf)
     } else {
         val existing = dest.findFile(entry.name)?.takeIf { it.isFile }
         if (existing != null && !ask(entry.name)) {
@@ -298,8 +367,18 @@ private suspend fun copyInto(
             return
         }
         val file = existing ?: dest.createFile(mimeOf(entry.name), entry.name) ?: return
-        ctx.contentResolver.openOutputStream(file.uri, "wt")?.use { out ->
-            backend.open(entry.id).use { it.copyTo(out) }
+        // 받는 중에 연결이 끊기면 그 파일만 처음부터 다시 받는다("wt" 라 기존 내용은 잘린다).
+        var attempt = 0
+        while (true) {
+            try {
+                ctx.contentResolver.openOutputStream(file.uri, "wt")?.use { out ->
+                    backend.open(entry.id).use { it.copyTo(out) }
+                }
+                break
+            } catch (e: java.io.IOException) {
+                if (++attempt > 3) throw e
+                awaitNetwork()
+            }
         }
         onLeaf(entry.name)
     }

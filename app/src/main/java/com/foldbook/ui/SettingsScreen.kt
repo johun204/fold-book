@@ -53,10 +53,10 @@ fun SettingsScreen(app: App) {
     var spread by remember { mutableStateOf(prefs.spreadMode) }
     var fitMode by remember { mutableStateOf(prefs.fitMode) }
     var enhance by remember { mutableFloatStateOf(prefs.enhanceLevel.toFloat()) }
-    var fold by remember { mutableStateOf(prefs.foldFlip) }
     var split by remember { mutableStateOf(prefs.splitWideScans) }
     var analyzeRemote by remember { mutableStateOf(prefs.analyzeRemote) }
     var remoteThumbs by remember { mutableStateOf(prefs.remoteThumbnails) }
+    var wifiOnly by remember { mutableStateOf(prefs.wifiOnlyDownload) }
     var prefetch by remember { mutableFloatStateOf(prefs.prefetchForward.toFloat()) }
     var tapWide by remember { mutableFloatStateOf(prefs.tapZoneWide) }
     var tapNarrow by remember { mutableFloatStateOf(prefs.tapZoneNarrow) }
@@ -200,20 +200,21 @@ fun SettingsScreen(app: App) {
             )
 
             Divider()
+            Section("다운로드")
+            ToggleRow(
+                "Wi-Fi 에서만 다운로드", wifiOnly,
+                "모바일 데이터로 받으려고 하면 먼저 물어봅니다. 받는 도중 Wi-Fi 가 끊기면 일시중지하고, " +
+                    "다시 연결되면 이어서 받습니다(모바일 데이터로 계속 받을지 고를 수도 있습니다). " +
+                    "끄면 어떤 연결에서든 바로 받습니다.",
+            ) { wifiOnly = it; prefs.wifiOnlyDownload = it }
+
+            Divider()
             Section("탐색")
             ToggleRow(
                 "원격 폴더에서 이미지 썸네일 표시", remoteThumbs,
                 "SMB·드라이브 폴더를 탐색할 때 이미지 미리보기를 보여줍니다. 화면에 보이는 항목만 받아오지만 " +
                     "파일 전체를 내려받으므로 데이터를 씁니다(한 번 받으면 캐시). 로컬 저장소는 항상 썸네일을 표시합니다.",
             ) { remoteThumbs = it; prefs.remoteThumbnails = it }
-
-            Divider()
-            Section("폴더블")
-            ToggleRow(
-                "접힘 제스처로 페이지 넘기기", fold,
-                "갤럭시 폴드류에서 기기를 살짝 접었다 펴면 다음 페이지로 넘어갑니다. " +
-                    "경첩 센서 상태(평평 → 반 접힘 → 평평)를 감지해 동작합니다.",
-            ) { fold = it; prefs.foldFlip = it }
 
             Divider()
             Section("정보")

@@ -68,6 +68,7 @@ import com.foldbook.App
 import com.foldbook.ConnType
 import com.foldbook.Connection
 import com.foldbook.DownloadService
+import com.foldbook.Prefs
 import com.foldbook.Entry
 import com.foldbook.NoMedia
 import com.foldbook.ReaderActivity
@@ -134,6 +135,9 @@ fun BrowseFolderScreen(
         loading = false
     }
 
+    // 모바일 데이터인데 'Wi-Fi 에서만' 설정이면 확인을 받는다. (null = 물어볼 것 없음)
+    var meteredAsk by remember { mutableStateOf<(() -> Unit)?>(null) }
+
     val treePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
         val picked = entries.filter { selected[it.id] == true }
@@ -145,7 +149,27 @@ fun BrowseFolderScreen(
                 uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
             )
         }
-        DownloadService.start(ctx, connId, uri, picked, curName.ifBlank { conn.label })
+        val label = curName.ifBlank { conn.label }
+        val wifiOnly = Prefs(ctx).wifiOnlyDownload
+        if (wifiOnly && !DownloadService.isUnmetered(ctx)) {
+            meteredAsk = { DownloadService.start(ctx, connId, uri, picked, label, allowMetered = true) }
+        } else {
+            DownloadService.start(ctx, connId, uri, picked, label, allowMetered = !wifiOnly)
+        }
+    }
+
+    meteredAsk?.let { go ->
+        AlertDialog(
+            onDismissRequest = { meteredAsk = null },
+            title = { Text("Wi-Fi 가 아닙니다") },
+            text = { Text("지금은 모바일 데이터에 연결돼 있습니다. 데이터 요금이 들 수 있습니다. 그래도 받을까요?") },
+            confirmButton = {
+                TextButton(onClick = { meteredAsk = null; go() }) { Text("그래도 다운로드") }
+            },
+            dismissButton = {
+                TextButton(onClick = { meteredAsk = null }) { Text("취소") }
+            },
+        )
     }
 
     Scaffold(
