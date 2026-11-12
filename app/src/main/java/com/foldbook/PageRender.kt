@@ -2,7 +2,9 @@ package com.foldbook
 
 import android.os.Handler
 import android.os.Message
+import java.util.IdentityHashMap
 import com.eschao.android.widget.pageflip.OnPageFlipListener
+import com.eschao.android.widget.pageflip.Page
 import com.eschao.android.widget.pageflip.PageFlip
 import com.eschao.android.widget.pageflip.PageFlipState
 
@@ -16,6 +18,8 @@ private const val DRAW_FULL_PAGE = 2
  * eschao Sample 의 렌더러 Kotlin 이식. 텍스처 출처는 PageImageProvider(창 방식 로더).
  * 아직 안 받은 페이지는 회색이 나오고, 실제 비트맵이 도착하면 그 페이지 한정으로 텍스처를 한 번 교체한다
  * (매 프레임 setFirstTexture 를 부르면 eschao 가 GL 텍스처를 계속 새로 만들어 누수됨 -> 1회로 제한).
+ * 넘기는 동안 미리 올린 텍스처가 실제 이미지였는지도 기억해 두었다가, 넘김이 끝나 그 텍스처가
+ * 화면에 남을 때 같은 그림을 다시 올리지 않는다(화면 크기 텍스처 업로드는 프레임을 떨어뜨린다).
  * pageNo 는 리더 페이지 번호(1-based). 더블 모드에서는 왼쪽 페이지 번호.
  */
 abstract class PageRender(
@@ -28,8 +32,9 @@ abstract class PageRender(
 ) : OnPageFlipListener {
 
     protected var drawCommand = DRAW_FULL_PAGE
-    protected var firstReal = false
-    protected var secondReal = false
+
+    /** 올려 둔 텍스처가 회색이라는 표시를 모두 되돌린다 (텍스처를 전부 다시 올려야 할 때). */
+    protected abstract fun resetReal()
 
     init {
         pageFlip.setListener(this)
@@ -39,15 +44,13 @@ abstract class PageRender(
         val page = pageFlip.firstPage
         provider.setPageSize(page.width().toInt(), page.height().toInt())
         provider.setSpread(this is Double)
-        firstReal = false
-        secondReal = false
+        resetReal()
     }
 
     /** 스크러버로 특정 페이지로 점프. GL 스레드에서 호출할 것. */
     fun jumpTo(pageNumber: Int) {
         pageNo = pageNumber.coerceIn(1, maxOf(1, provider.count))
-        firstReal = false
-        secondReal = false
+        resetReal()
         drawCommand = DRAW_FULL_PAGE
         pageFlip.firstPage?.deleteAllTextures()
         pageFlip.secondPage?.deleteAllTextures()
@@ -91,8 +94,6 @@ abstract class PageRender(
     }
 
     protected fun settled() {
-        firstReal = false
-        secondReal = false
         val n = pageNo
         handler.post { onSettled(n) }
     }
@@ -125,6 +126,21 @@ abstract class PageRender(
         /** 되돌린 뒤 미리 올려둔 '넘어갈 페이지' 텍스처를 버려야 하는가 (GL 스레드에서 처리). */
         private var dropPreview = false
 
+        /** 현재 페이지 / 미리 올려둔 넘어갈 페이지 텍스처가 실제 이미지인가 (회색 아님). */
+        private var firstReal = false
+        private var targetReal = false
+
+        override fun resetReal() {
+            firstReal = false
+            targetReal = false
+        }
+
+        private fun setFirst() {
+            val b = provider.bitmapOrNull(pageNo)
+            pageFlip.firstPage.setFirstTexture(b ?: provider.bitmap(pageNo))
+            firstReal = b != null
+        }
+
         override fun onDrawFrame() {
             pageFlip.deleteUnusedTextures()
             val page = pageFlip.firstPage
@@ -136,18 +152,20 @@ abstract class PageRender(
             when (drawCommand) {
                 DRAW_MOVING_FRAME, DRAW_ANIMATING_FRAME -> {
                     // 어느 방향이든 '현재 페이지(first)'가 접히고 그 아래 넘어갈 페이지(second)가 드러난다
-                    if (!page.isFirstTextureSet) page.setFirstTexture(provider.bitmap(pageNo))
-                    if (!page.isSecondTextureSet) page.setSecondTexture(provider.bitmap(targetNo()))
+                    if (!page.isFirstTextureSet) setFirst()
+                    if (!page.isSecondTextureSet) {
+                        val b = provider.bitmapOrNull(targetNo())
+                        page.setSecondTexture(b ?: provider.bitmap(targetNo()))
+                        targetReal = b != null
+                    }
                     pageFlip.drawFlipFrame()
                 }
                 DRAW_FULL_PAGE -> {
                     if (!page.isFirstTextureSet) {
-                        page.setFirstTexture(provider.bitmap(pageNo))
-                        firstReal = provider.isReal(pageNo)
+                        setFirst()
                     } else if (!firstReal && provider.isReal(pageNo)) {
                         page.deleteAllTextures()
-                        page.setFirstTexture(provider.bitmap(pageNo))
-                        firstReal = true
+                        setFirst()
                     }
                     pageFlip.drawPageFrame()
                 }
@@ -166,6 +184,8 @@ abstract class PageRender(
             if (pageFlip.flipState == PageFlipState.END_WITH_FORWARD) {
                 pageFlip.firstPage.setFirstTextureWithSecond()
                 pageNo = targetNo().coerceIn(1, maxOf(1, provider.count))
+                firstReal = targetReal      // 미리 올려둔 텍스처가 그대로 현재 페이지가 된다
+                targetReal = false
                 drawCommand = DRAW_FULL_PAGE
                 settled()
             } else {
@@ -195,32 +215,53 @@ abstract class PageRender(
         ob: (Boolean) -> Unit, os: (Int) -> Unit,
     ) : PageRender(pf, h, p, pageNo, ob, os) {
 
+        /**
+         * 페이지(왼쪽/오른쪽 Page 객체)별로, 올려 둔 세 텍스처가 실제 이미지인가.
+         * 어느 쪽이 '넘기는 페이지(first)'인지는 터치마다 바뀌므로 역할이 아니라 객체에 붙여 둔다.
+         */
+        private class Real { var first = false; var back = false; var second = false }
+        private val real = IdentityHashMap<Page, Real>()
+        private fun realOf(p: Page) = real.getOrPut(p) { Real() }
+
+        override fun resetReal() = real.clear()
+
+        /** 보이는 면(first 텍스처)을 올린다. 아직 회색이었고 실제 이미지가 도착했으면 바꿔 올린다. */
+        private fun showFace(page: Page, n: Int) {
+            val r = realOf(page)
+            if (page.isFirstTextureSet && (r.first || !provider.isReal(n))) return
+            if (page.isFirstTextureSet) {
+                page.deleteAllTextures()       // 뒷면·다음 장 텍스처도 함께 지워진다
+                r.back = false
+                r.second = false
+            }
+            val b = provider.bitmapOrNull(n)
+            page.setFirstTexture(b ?: provider.bitmap(n))
+            r.first = b != null
+        }
+
         override fun onDrawFrame() {
             pageFlip.deleteUnusedTextures()
             val first = pageFlip.firstPage
             val second = pageFlip.secondPage ?: return
 
-            val nFirst = if (first.isLeftPage) pageNo else pageNo + 1
-            val nSecond = if (second.isLeftPage) pageNo else pageNo + 1
-            if (!first.isFirstTextureSet) {
-                first.setFirstTexture(provider.bitmap(nFirst)); firstReal = provider.isReal(nFirst)
-            } else if (!firstReal && provider.isReal(nFirst)) {
-                first.deleteAllTextures()
-                first.setFirstTexture(provider.bitmap(nFirst)); firstReal = true
-            }
-            if (!second.isFirstTextureSet) {
-                second.setFirstTexture(provider.bitmap(nSecond)); secondReal = provider.isReal(nSecond)
-            } else if (!secondReal && provider.isReal(nSecond)) {
-                second.deleteAllTextures()
-                second.setFirstTexture(provider.bitmap(nSecond)); secondReal = true
-            }
+            showFace(first, if (first.isLeftPage) pageNo else pageNo + 1)
+            showFace(second, if (second.isLeftPage) pageNo else pageNo + 1)
 
             when (drawCommand) {
                 DRAW_MOVING_FRAME, DRAW_ANIMATING_FRAME -> {
-                    if (!first.isBackTextureSet)
-                        first.setBackTexture(provider.bitmap(if (first.isLeftPage) pageNo - 1 else pageNo + 2))
-                    if (!first.isSecondTextureSet)
-                        first.setSecondTexture(provider.bitmap(if (first.isLeftPage) pageNo - 2 else pageNo + 3))
+                    val r = realOf(first)
+                    if (!first.isBackTextureSet) {
+                        val n = if (first.isLeftPage) pageNo - 1 else pageNo + 2
+                        val b = provider.bitmapOrNull(n)
+                        first.setBackTexture(b ?: provider.bitmap(n))
+                        r.back = b != null
+                    }
+                    if (!first.isSecondTextureSet) {
+                        val n = if (first.isLeftPage) pageNo - 2 else pageNo + 3
+                        val b = provider.bitmapOrNull(n)
+                        first.setSecondTexture(b ?: provider.bitmap(n))
+                        r.second = b != null
+                    }
                     pageFlip.drawFlipFrame()
                 }
                 DRAW_FULL_PAGE -> pageFlip.drawPageFrame()
@@ -241,14 +282,36 @@ abstract class PageRender(
                 val second = pageFlip.secondPage
                 if (second != null) {
                     second.swapTexturesWithPage(first)
+                    // 텍스처가 옮겨간 그대로 '실제 이미지인가' 표시도 옮긴다 (Page.swapTexturesWithPage 와 같은 순서)
+                    val rs = realOf(second)
+                    val rf = realOf(first)
+                    rs.second = rs.first
+                    rs.back = rf.first
+                    rs.first = rf.back
+                    rf.back = false
+                    rf.first = rf.second
+                    rf.second = false
+                    // 반대쪽 페이지에 남은 뒷면·다음 장 텍스처는 되넘길 때 그대로 쓰인다.
+                    // 회색인 채로 남았으면 버려서 그때 새로 올리게 한다.
+                    if (!rs.back || !rs.second) dropFlipTextures(second)
                     pageNo += if (first.isLeftPage) -2 else 2
                 }
                 drawCommand = DRAW_FULL_PAGE
                 settled()
                 return true
             }
+            // 제자리로 돌아온 경우: 회색으로 올려둔 뒷면·다음 장은 다음에 끌 때 다시 올린다.
+            pageFlip.firstPage?.let { p ->
+                val r = realOf(p)
+                if (!r.back || !r.second) dropFlipTextures(p)
+            }
             drawCommand = DRAW_FULL_PAGE
             return true
+        }
+
+        private fun dropFlipTextures(page: Page) {
+            page.dropFlipTextures()
+            realOf(page).let { it.back = false; it.second = false }
         }
 
         override fun canFlipForward(): Boolean {

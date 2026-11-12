@@ -9,9 +9,8 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
-        maven { url = uri("https://jitpack.io") }
     }
 }
-rootProject.name = "ComicViewer"
+rootProject.name = "fold-book"
 include(":app")
 include(":pageflip")

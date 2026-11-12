@@ -21,8 +21,13 @@ class App : Application() {
         super.onCreate()
         connections = ConnectionStore(this)
         sessions = SessionStore(this)
-        // 활성 세션에 없는 캐시 + 구버전 찌꺼기 정리
-        SessionCache.sweep(this, sessions.activeIds())
+        // 활성 세션에 없는 캐시 + 구버전 찌꺼기 정리 (수백 MB 를 훑을 수 있어 메인 스레드 밖에서)
+        appScope.launch {
+            SessionCache.sweep(
+                this@App, { sessions.activeIds() },
+                mostRecentId = sessions.flow.value.firstOrNull { !it.finished }?.id,
+            )
+        }
         prewarmDrive()
     }
 

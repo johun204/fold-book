@@ -21,8 +21,8 @@ android {
         applicationId = "com.foldbook"
         minSdk = 26
         targetSdk = 35
-        versionCode = 26
-        versionName = "0.6.9"
+        versionCode = 27
+        versionName = "0.7.0"
     }
 
     signingConfigs {
@@ -75,9 +75,6 @@ dependencies {
 
     // 3D 종이책 페이지 넘김 — eschao/android-PageFlip 벤더링 (pageflip/ 참고)
     implementation(project(":pageflip"))
-
-    // 폴더블 접힘 센서
-    implementation("androidx.window:window:1.3.0")
 
     // 윈도우 공유폴더 (SMB2/3)
     implementation("com.hierynomus:smbj:0.13.0")

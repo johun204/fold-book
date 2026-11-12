@@ -12,45 +12,64 @@ import java.util.UUID
 private val json = Json { ignoreUnknownKeys = true; prettyPrint = false }
 
 /** filesDir 안 JSON 파일 1개에 리스트를 저장하는 초경량 스토어. 목록이 작아 통짜 저장이면 충분. */
-private inline fun <reified T> loadList(file: File): List<T> =
-    runCatching { if (file.exists()) json.decodeFromString<List<T>>(file.readText()) else emptyList() }
-        .getOrDefault(emptyList())
+private inline fun <reified T> loadList(file: File): List<T> {
+    if (!file.exists()) return emptyList()
+    return runCatching { json.decodeFromString<List<T>>(file.readText()) }.getOrElse {
+        // 읽을 수 없는 파일은 빈 목록으로 덮어쓰기 전에 따로 남겨 둔다.
+        runCatching { file.copyTo(File(file.path + ".bak"), overwrite = true) }
+        emptyList()
+    }
+}
 
+/** 임시 파일에 쓰고 이름을 바꾼다 — 쓰는 도중 죽어도 기존 목록이 반쪽 파일로 망가지지 않는다. */
 private inline fun <reified T> saveList(file: File, list: List<T>) {
-    runCatching { file.writeText(json.encodeToString(list)) }
+    runCatching {
+        val tmp = File(file.path + ".tmp")
+        tmp.writeText(json.encodeToString(list))
+        if (!tmp.renameTo(file)) { tmp.copyTo(file, overwrite = true); tmp.delete() }
+    }
 }
 
 class ConnectionStore(context: Context) {
     private val file = File(context.applicationContext.filesDir, "connections.json")
-    private val _flow = MutableStateFlow(seedIfEmpty(loadList<Connection>(file)))
+    // 파일에는 비밀번호를 암호화해 두고(PassCrypt), 메모리에서는 평문으로 쓴다.
+    private val stored = loadList<Connection>(file)
+    private val _flow = MutableStateFlow(
+        seedIfEmpty(stored.map { it.copy(pass = PassCrypt.decrypt(it.pass)) }),
+    )
+
+    private fun save() = saveList(file, _flow.value.map { it.copy(pass = PassCrypt.encrypt(it.pass)) })
+
+    init {
+        // 예전 버전이 평문으로 저장해 둔 비밀번호는 바로 암호화해서 다시 쓴다.
+        if (stored.any { it.pass.isNotEmpty() && !PassCrypt.isEncrypted(it.pass) }) save()
+    }
     val flow: StateFlow<List<Connection>> = _flow.asStateFlow()
 
     private fun seedIfEmpty(list: List<Connection>): List<Connection> {
         if (list.any { it.type == ConnType.LOCAL }) return list
         val local = Connection(id = "local", type = ConnType.LOCAL, label = "기기 저장소")
-        val next = listOf(local) + list
-        saveList(file, next)
-        return next
+        return listOf(local) + list     // 파일에는 다음 변경 때 함께 저장된다
     }
 
     fun get(id: String): Connection? = _flow.value.firstOrNull { it.id == id }
 
     fun add(c: Connection) {
         _flow.value = _flow.value + c.copy(id = c.id.ifBlank { UUID.randomUUID().toString() })
-        saveList(file, _flow.value)
+        save()
     }
 
     fun remove(id: String) {
         if (id == "local") return
         _flow.value = _flow.value.filterNot { it.id == id }
-        saveList(file, _flow.value)
+        save()
     }
 
     /** 별칭(표시 이름) 변경. */
     fun rename(id: String, label: String) {
         if (id == "local" || label.isBlank()) return
         _flow.value = _flow.value.map { if (it.id == id) it.copy(label = label.trim()) else it }
-        saveList(file, _flow.value)
+        save()
     }
 }
 

@@ -19,6 +19,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.lifecycleScope
 import com.foldbook.reader.PageSource
+import com.google.android.gms.auth.UserRecoverableAuthException
 import com.foldbook.reader.SessionManifestStore
 import com.foldbook.ui.FoldBookTheme
 import com.foldbook.ui.ReaderScreen
@@ -56,7 +57,8 @@ class ReaderActivity : ComponentActivity() {
     private var folderId: String = ""
     private var rolling = false
     private var saveJob: Job? = null
-    private var restoredPage = 0
+    private var restoredEntry: String? = null       // 재생성(recreate) 직전에 보던 이미지
+    private var restoredHalf: Half? = null
 
     private sealed interface BoundaryPrompt {
         data class PrevVolume(val folder: Entry) : BoundaryPrompt
@@ -81,7 +83,8 @@ class ReaderActivity : ComponentActivity() {
         immersive()
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
-        restoredPage = savedInstanceState?.getInt(SAVED_PAGE, 0) ?: 0
+        restoredEntry = savedInstanceState?.getString(SAVED_ENTRY)
+        restoredHalf = savedInstanceState?.getString(SAVED_HALF)?.let { h -> Half.entries.firstOrNull { it.name == h } }
 
         setContent {
             FoldBookTheme {
@@ -173,7 +176,11 @@ class ReaderActivity : ComponentActivity() {
 
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
-        flip?.let { outState.putInt(SAVED_PAGE, it.currentPageNumber()) }
+        // 페이지 번호가 아니라 이미지로 기억한다 — 보기 방식·방향을 바꾸면 빈 페이지 끼움이 달라져 번호가 밀린다.
+        flip?.let { refAt(it.currentPageNumber()) }?.let {
+            outState.putString(SAVED_ENTRY, it.entryId)
+            outState.putString(SAVED_HALF, it.half.name)
+        }
     }
 
     /** 폴드/펼침·회전으로 화면이 바뀌어도 Activity 를 재생성하지 않고(manifest configChanges) 그 자리에서 대응. */
@@ -225,7 +232,9 @@ class ReaderActivity : ComponentActivity() {
 
         var s = sessionId?.let { app.sessions.get(it) }
             ?: app.sessions.findOrCreate(conn, fId, fName)
-        if (s.finished) s = s.copy(finished = false, pageIndex = 0)   // 완료 세션 다시 열면 처음부터
+        if (s.finished) {   // 완료 세션 다시 열면 처음부터
+            s = s.copy(finished = false, pageIndex = 0, lastEntryId = null, lastHalf = null)
+        }
         session = s
 
         val prefs = Prefs(this)
@@ -235,48 +244,52 @@ class ReaderActivity : ComponentActivity() {
             resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
         val cacheDir = SessionCache.dir(this, s.id)
 
+        val analyze = prefs.splitWideScans && (conn.type == ConnType.LOCAL || prefs.analyzeRemote)
+        val startAtEnd = intent.getBooleanExtra(EXTRA_START_AT_END, false)
+
         // --- 빠른 경로: 저장된 매니페스트로 네트워크 없이 즉시 열기 ---
+        // (스캔본 분석 설정이 저장 당시와 달라졌으면 크기 정보가 맞지 않으므로 다시 조회한다)
         val manifest = if (startEntryId == null) SessionManifestStore.load(cacheDir) else null
         if (manifest != null && manifest.connectionId == conn.id && manifest.folderId == fId &&
-            manifest.entries.isNotEmpty()
+            manifest.entries.isNotEmpty() && manifest.analyzed == analyze
         ) {
             val imgs = manifest.asEntries()
             imgs.forEach { DimsCache.put("${conn.id}|${it.id}", manifest.dimOf(it.id)) }
             images = imgs
             val pages = SpreadPolicy.expand(imgs, dir, doubleMode, prefs.splitWideScans) { manifest.dimOf(it) }
-            buildReader(pages, dir, doubleMode, s, fName, startEntryId = null, startAtEnd = false)
-            refreshInBackground(fId, dir, doubleMode, prefs, cacheDir, manifest.entryIds())
+            buildReader(pages, dir, doubleMode, s, fName, startEntryId = null, startAtEnd = startAtEnd)
+            refreshInBackground(fId, dir, analyze, cacheDir, manifest.entryIds())
             return
         }
 
         // --- 느린 경로: 폴더 조회 + 스캔본 분석 + 매니페스트 기록 ---
         val imgs = try {
             backend.list(fId).filter { !it.isDir }
+        } catch (e: UserRecoverableAuthException) {
+            toast("구글 계정 권한 확인이 필요합니다 — 탐색 탭에서 드라이브를 한 번 열어 주세요"); finish(); return
         } catch (e: Exception) {
             toast(getString(R.string.remote_failed, e.message ?: e.javaClass.simpleName)); finish(); return
         }
         if (imgs.isEmpty()) { toast(getString(R.string.err_empty)); finish(); return }
         images = imgs
 
-        val analyze = prefs.splitWideScans && (conn.type == ConnType.LOCAL || prefs.analyzeRemote)
         val dimsMap = if (analyze) scanSizes(imgs) else emptyMap()
-        SessionManifestStore.save(cacheDir, conn.id, fId, dir, imgs, dimsMap)
+        SessionManifestStore.save(cacheDir, conn.id, fId, dir, imgs, dimsMap, analyze)
 
         val pages = SpreadPolicy.expand(imgs, dir, doubleMode, prefs.splitWideScans) { id -> dimsMap[id] }
-        buildReader(pages, dir, doubleMode, s, fName, startEntryId, intent.getBooleanExtra(EXTRA_START_AT_END, false))
+        buildReader(pages, dir, doubleMode, s, fName, startEntryId, startAtEnd)
     }
 
     /** 매니페스트로 연 뒤, 실제 목록과 대조해 달라졌으면 매니페스트만 갱신(다음 열람에 반영). */
     private fun refreshInBackground(
-        fId: String, dir: ReadingDirection, doubleMode: Boolean, prefs: Prefs,
+        fId: String, dir: ReadingDirection, analyze: Boolean,
         cacheDir: File, knownIds: List<String>,
     ) {
         lifecycleScope.launch(Dispatchers.IO) {
             val fresh = runCatching { backend.list(fId).filter { !it.isDir } }.getOrNull() ?: return@launch
             if (fresh.isEmpty() || fresh.map { it.id } == knownIds) return@launch
-            val analyze = prefs.splitWideScans && (conn.type == ConnType.LOCAL || prefs.analyzeRemote)
             val dimsMap = if (analyze) scanSizes(fresh) else emptyMap()
-            SessionManifestStore.save(cacheDir, conn.id, fId, dir, fresh, dimsMap)
+            SessionManifestStore.save(cacheDir, conn.id, fId, dir, fresh, dimsMap, analyze)
             withContext(Dispatchers.Main) {
                 toast("폴더 내용이 바뀌었어요 — 다시 열면 반영됩니다")
             }
@@ -286,30 +299,35 @@ class ReaderActivity : ComponentActivity() {
     private fun buildReader(
         pages: List<PageRef>, dir: ReadingDirection, doubleMode: Boolean,
         sessionIn: Session, fName: String, startEntryId: String?, startAtEnd: Boolean,
+        startHalf: Half? = null,
     ) {
         if (pages.isEmpty()) { toast(getString(R.string.err_empty)); finish(); return }
         var s = sessionIn
         val readingRtl = dir == ReadingDirection.RTL
 
-        val startPageIdx = startEntryId
-            ?.let { e -> pages.indexOfFirst { it.entryId == e } }
-            ?.takeIf { it >= 0 } ?: 0
+        // 마지막으로 본 위치: 이미지로 찾고(단면/양면에 따라 페이지 번호가 달라지므로),
+        // 예전 버전 세션이거나 그 이미지가 사라졌으면 저장된 페이지 번호로.
+        val saved = pageNumberOf(pages, s.lastEntryId, s.lastHalf)
+            ?: (s.pageIndex + 1).takeIf { s.pageIndex in pages.indices }
 
         var startPage = when {
-            restoredPage in 1..pages.size -> restoredPage
-            startEntryId != null -> startPageIdx + 1
-            s.pageIndex in pages.indices && s.pageIndex > 0 -> s.pageIndex + 1
+            restoredEntry != null -> pageNumberOf(pages, restoredEntry, restoredHalf) ?: saved ?: 1
+            startEntryId != null -> pageNumberOf(pages, startEntryId, startHalf) ?: 1
+            saved != null && saved > 1 -> saved
             startAtEnd -> pages.size
-            s.pageIndex in pages.indices -> s.pageIndex + 1
-            else -> 1
+            else -> saved ?: 1
         }
+        restoredEntry = null
         if (doubleMode && startPage % 2 == 0) startPage = (startPage - 1).coerceAtLeast(1)
         intent.removeExtra(EXTRA_START_ENTRY_ID)
         intent.removeExtra(EXTRA_START_AT_END)
 
+        val startRef = pageRefAt(pages, startPage)
         s = s.copy(
             pageCount = pages.size,
             pageIndex = (startPage - 1).coerceIn(0, (pages.size - 1).coerceAtLeast(0)),
+            lastEntryId = startRef?.entryId,
+            lastHalf = startRef?.half,
             folderName = fName.ifBlank { s.folderName },
             finished = false,
         )
@@ -355,7 +373,7 @@ class ReaderActivity : ComponentActivity() {
 
         val prefs = Prefs(this)
         val dir = s.directionOverride ?: prefs.direction
-        val keep = src.pages.getOrNull(pageNum - 1)?.entryId?.takeIf { it.isNotEmpty() }
+        val keep = pageRefAt(src.pages, pageNum)
         val pages = SpreadPolicy.expand(imgs, dir, newDouble, prefs.splitWideScans) { id ->
             DimsCache.get("${conn.id}|$id")
         }
@@ -363,11 +381,16 @@ class ReaderActivity : ComponentActivity() {
         ready = false
         flip = null
         source = null
-        restoredPage = 0
-        buildReader(pages, dir, newDouble, s, s.folderName, startEntryId = keep, startAtEnd = false)
-        // 예전 GL 뷰가 떨어져 나간 뒤에 닫는다 (먼저 닫으면 GL 스레드가 재활용된 비트맵을 쓴다)
-        window.decorView.post { src.close() }
+        restoredEntry = null
+        buildReader(
+            pages, dir, newDouble, s, s.folderName,
+            startEntryId = keep?.entryId, startAtEnd = false, startHalf = keep?.half,
+        )
+        // 예전 PageSource 는 예전 GL 뷰가 Compose 에서 떨어져 나갈 때 닫힌다 (ReaderScreen 의 onRelease).
+        // 여기서 먼저 닫으면 GL 스레드가 재활용된 비트맵을 쓴다.
     }
+
+    private fun refAt(pageNumber: Int): PageRef? = source?.let { pageRefAt(it.pages, pageNumber) }
 
     private suspend fun scanSizes(images: List<Entry>): Map<String, Pair<Int, Int>?> {
         val result = HashMap<String, Pair<Int, Int>?>(images.size)
@@ -391,7 +414,11 @@ class ReaderActivity : ComponentActivity() {
     }
 
     private fun saveProgress(pageNumber: Int) {
-        val s = session?.copy(pageIndex = (pageNumber - 1).coerceAtLeast(0)) ?: return
+        val ref = refAt(pageNumber)
+        val s = session?.copy(
+            pageIndex = (pageNumber - 1).coerceAtLeast(0),
+            lastEntryId = ref?.entryId, lastHalf = ref?.half,
+        ) ?: return
         session = s
         saveJob?.cancel()
         saveJob = lifecycleScope.launch {
@@ -506,7 +533,8 @@ class ReaderActivity : ComponentActivity() {
         const val EXTRA_START_ENTRY_ID = "startEntry"
         const val EXTRA_SESSION_ID = "session"
         const val EXTRA_START_AT_END = "startAtEnd"
-        private const val SAVED_PAGE = "savedPage"
+        private const val SAVED_ENTRY = "savedEntry"
+        private const val SAVED_HALF = "savedHalf"
 
         fun start(
             ctx: android.content.Context, connId: String, folderId: String, folderName: String,

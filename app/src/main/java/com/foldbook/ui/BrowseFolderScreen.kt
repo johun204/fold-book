@@ -74,6 +74,7 @@ import com.foldbook.NoMedia
 import com.foldbook.ReaderActivity
 import com.foldbook.StorageBackend
 import com.foldbook.backendFor
+import com.google.android.gms.auth.UserRecoverableAuthException
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -107,6 +108,7 @@ fun BrowseFolderScreen(
     var selecting by remember { mutableStateOf(false) }
     val selected = remember { mutableStateMapOf<String, Boolean>() }
     val download by DownloadService.state.collectAsStateWithLifecycle()
+    val downloading = download?.finished == false
     val notifPerm = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
 
     val isLocal = conn.type == ConnType.LOCAL
@@ -116,6 +118,10 @@ fun BrowseFolderScreen(
         if (isLocal) entries.filter { it.isDir && NoMedia.exists(it.id) }.map { it.id }.toSet() else emptySet()
     }
     fun toast(m: String) = android.widget.Toast.makeText(ctx, m, android.widget.Toast.LENGTH_SHORT).show()
+
+    val authRecover = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { res ->
+        if (res.resultCode == android.app.Activity.RESULT_OK) reload++
+    }
 
     val needsPermission = conn.type == ConnType.LOCAL &&
         Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
@@ -129,6 +135,10 @@ fun BrowseFolderScreen(
             curId = id
             curName = folderName.ifBlank { backend.root().name }
             entries = backend.list(id)
+        } catch (e: UserRecoverableAuthException) {
+            // 드라이브 접근 동의가 만료·철회됨 → 구글의 동의 화면을 띄우고, 돌아오면 다시 불러온다.
+            error = "구글 계정 권한 확인이 필요합니다"
+            e.intent?.let { runCatching { authRecover.launch(it) } }
         } catch (e: Exception) {
             error = e.message ?: e.javaClass.simpleName
         }
@@ -215,8 +225,9 @@ fun BrowseFolderScreen(
                                 )
                             }
                             DropdownMenuItem(
-                                text = { Text("파일/폴더 다운로드") },
+                                text = { Text(if (downloading) "다운로드 (진행 중인 작업이 끝난 뒤)" else "파일/폴더 다운로드") },
                                 leadingIcon = { Icon(AppIcons.Download, null) },
+                                enabled = !downloading,
                                 onClick = {
                                     menu = false; selecting = true; selected.clear()
                                     if (Build.VERSION.SDK_INT >= 33) {

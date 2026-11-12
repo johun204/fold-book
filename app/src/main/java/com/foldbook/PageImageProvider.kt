@@ -40,6 +40,12 @@ class PageImageProvider(val source: PageSource, private val rtl: Boolean = false
         return source.bitmap(i) ?: source.placeholder()
     }
 
+    /** 준비된 실제 비트맵. 아직 안 받았으면(또는 범위 밖이면) null. */
+    fun bitmapOrNull(libPage: Int): Bitmap? {
+        val i = idx(libPage)
+        return if (i in 0 until count) source.bitmap(i) else null
+    }
+
     /** 해당 페이지의 실제 이미지가 준비됐는지 (회색 아님). */
     fun isReal(libPage: Int): Boolean {
         val i = idx(libPage)

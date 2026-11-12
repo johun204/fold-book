@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 저장소 연결(공유폴더 계정 정보)은 백업에 넣지 않는다. -->
+<full-backup-content>
+    <exclude domain="file" path="connections.json" />
+    <exclude domain="file" path="connections.json.bak" />
+</full-backup-content>

@@ -45,6 +45,9 @@ data class Session(
     val finished: Boolean = false,      // 폴더 끝까지 다 봄 → 홈의 '완료' 그룹
     val directionOverride: ReadingDirection? = null,  // 이 책(폴더)만의 읽기 방향. null = 설정의 기본값
     val enhanceLevel: Int? = null,      // 이 책(폴더)만의 스캔 보정 강도(0=끔, 1~5). null = 설정의 기본값
+    // 마지막으로 본 이미지. pageIndex 는 단면/양면에 따라 빈 페이지가 끼어 달라지므로 이어보기는 이걸로 찾는다.
+    val lastEntryId: String? = null,
+    val lastHalf: Half? = null,
 )
 
 /** 폴더 탐색 항목. */

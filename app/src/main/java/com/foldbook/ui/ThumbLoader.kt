@@ -2,6 +2,7 @@ package com.foldbook.ui
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
@@ -15,10 +16,10 @@ object ThumbLoader {
     private const val MAX = 64
     private const val TARGET_PX = 160
 
-    private val cache = object : LinkedHashMap<String, Bitmap?>(16, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Bitmap?>): Boolean {
+    private val cache = object : LinkedHashMap<String, Bitmap>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Bitmap>): Boolean {
             val drop = size > MAX
-            if (drop) eldest.value?.recycle()
+            if (drop) eldest.value.recycle()
             return drop
         }
     }
@@ -27,17 +28,22 @@ object ThumbLoader {
     fun cached(key: String): Bitmap? = synchronized(cache) { cache[key]?.takeIf { !it.isRecycled } }
 
     suspend fun load(key: String, backend: StorageBackend, entryId: String): Bitmap? {
-        synchronized(cache) { if (cache.containsKey(key)) return cache[key] }
-        val bmp = runCatching {
+        cached(key)?.let { return it }
+        val bmp = try {
             sem.withPermit {
                 withContext(Dispatchers.IO) {
                     val bytes = backend.localPath(entryId)?.let { File(it).readBytes() }
-                        ?: backend.open(entryId).use { it.readBytes() }
+                        ?: backend.openThumbnail(entryId).use { it.readBytes() }
                     decode(bytes)
                 }
             }
-        }.getOrNull()
-        synchronized(cache) { cache[key] = bmp }
+        } catch (e: CancellationException) {
+            throw e          // 스크롤로 화면을 벗어난 것 — 실패로 기억하지 않는다
+        } catch (e: Exception) {
+            null
+        }
+        // 실패(null)는 캐시하지 않는다. 다시 보일 때 재시도.
+        if (bmp != null) synchronized(cache) { cache[key] = bmp }
         return bmp
     }
 

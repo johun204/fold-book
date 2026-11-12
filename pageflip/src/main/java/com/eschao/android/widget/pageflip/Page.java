@@ -254,9 +254,10 @@ public class Page {
                              INVALID_TEXTURE_ID,
                              INVALID_TEXTURE_ID};
         mUnusedTexSize = 0;
-        mUnusedTexIDs = new int[] {INVALID_TEXTURE_ID,
-                                   INVALID_TEXTURE_ID,
-                                   INVALID_TEXTURE_ID};
+        // fold-book: room for a swap (2) plus dropFlipTextures (2) between
+        // two frames, with slack.
+        mUnusedTexIDs = new int[8];
+        java.util.Arrays.fill(mUnusedTexIDs, INVALID_TEXTURE_ID);
 
         createVertexesBuffer();
         buildVertexesOfFullPage();
@@ -387,22 +388,52 @@ public class Page {
      * @return self
      */
     public Page swapTexturesWithPage(Page page) {
+        // fold-book: the mask colors travel with their textures. The app no
+        // longer re-uploads the visible textures after every flip, so a mask
+        // color left behind would tint the next fold with the previous image.
+
         // [second page]: second -> first
         mUnusedTexIDs[mUnusedTexSize++] = mTexIDs[SECOND_TEXTURE_ID];
         mTexIDs[SECOND_TEXTURE_ID] = mTexIDs[FIRST_TEXTURE_ID];
+        copyMaskColor(maskColor[FIRST_TEXTURE_ID], maskColor[SECOND_TEXTURE_ID]);
 
         // [first page] first -> [second page] back of first
         mUnusedTexIDs[mUnusedTexSize++] = mTexIDs[BACK_TEXTURE_ID];
         mTexIDs[BACK_TEXTURE_ID] = page.mTexIDs[FIRST_TEXTURE_ID];
+        copyMaskColor(page.maskColor[FIRST_TEXTURE_ID], maskColor[BACK_TEXTURE_ID]);
 
         // [first page] back of first -> [second page] first
         mTexIDs[FIRST_TEXTURE_ID] = page.mTexIDs[BACK_TEXTURE_ID];
         page.mTexIDs[BACK_TEXTURE_ID] = INVALID_TEXTURE_ID;
+        copyMaskColor(page.maskColor[BACK_TEXTURE_ID], maskColor[FIRST_TEXTURE_ID]);
 
         // [first page] second -> [first page] first
         page.mTexIDs[FIRST_TEXTURE_ID] = page.mTexIDs[SECOND_TEXTURE_ID];
         page.mTexIDs[SECOND_TEXTURE_ID] = INVALID_TEXTURE_ID;
+        copyMaskColor(page.maskColor[SECOND_TEXTURE_ID], page.maskColor[FIRST_TEXTURE_ID]);
         return this;
+    }
+
+    private static void copyMaskColor(float[] from, float[] to) {
+        to[0] = from[0];
+        to[1] = from[1];
+        to[2] = from[2];
+    }
+
+    /**
+     * fold-book: forget the back and second textures (they are deleted on the
+     * next frame) so that the next flip uploads them again. Safe to call
+     * without a GL context.
+     */
+    public void dropFlipTextures() {
+        if (mTexIDs[BACK_TEXTURE_ID] > INVALID_TEXTURE_ID) {
+            mUnusedTexIDs[mUnusedTexSize++] = mTexIDs[BACK_TEXTURE_ID];
+        }
+        mTexIDs[BACK_TEXTURE_ID] = INVALID_TEXTURE_ID;
+        if (mTexIDs[SECOND_TEXTURE_ID] > INVALID_TEXTURE_ID) {
+            mUnusedTexIDs[mUnusedTexSize++] = mTexIDs[SECOND_TEXTURE_ID];
+        }
+        mTexIDs[SECOND_TEXTURE_ID] = INVALID_TEXTURE_ID;
     }
 
     /**

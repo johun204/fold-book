@@ -10,8 +10,10 @@ import com.foldbook.FitMode
 import com.foldbook.Half
 import com.foldbook.PageRef
 import com.foldbook.StorageBackend
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -26,7 +28,7 @@ import kotlin.math.abs
  *   (양면 모드에서 가운데(책등)에 검은 여백이 생기지 않도록).
  * - [enhanceLevel] 이 0 보다 크면 흐린 흑백 스캔본을 회색조 + 톤커브로 또렷하게 만든다.
  * - [fit] 으로 이미지를 페이지에 맞추는 방식을 정한다(전부 보이기 / 가로 맞춤 / 세로 맞춤).
- * - RTL 이어도 텍스처는 반전하지 않는다(넘김 기하가 CurlEngine 에서 처리).
+ * - RTL 이어도 텍스처는 반전하지 않는다(순번만 [com.foldbook.PageImageProvider] 가 역순으로 매핑).
  */
 class PageSource(
     private val backend: StorageBackend,
@@ -40,6 +42,13 @@ class PageSource(
     private companion object {
         const val BACK = 2
 
+        /** 프리페치 창 바깥으로 이만큼 더 벗어난 페이지까지만 디코드된 채로 둔다. */
+        const val KEEP_MARGIN = 2
+
+        /** 불러오기 실패(네트워크 등) 시 다시 시도하는 횟수와 간격. */
+        const val RETRIES = 2
+        const val RETRY_DELAY_MS = 1500L
+
         /**
          * 보정 강도(1~5) → S 커브를 몇 번 적용할지. 소수는 마지막 한 번을 그만큼만 섞는다.
          * 1 번 적용이 예전 버전의 최대치였다 → 지금은 2 단계에 해당하고, 5 단계는 훨씬 세다.
@@ -48,7 +57,6 @@ class PageSource(
     }
 
     private val fwd = prefetchForward.coerceIn(1, 12)
-    private val keep = fwd + BACK + 6
 
     @Volatile private var pageW = 1
     @Volatile private var pageH = 1
@@ -57,9 +65,16 @@ class PageSource(
     /** 페이지 안에서 이미지를 가로로 어디에 붙일지 (0=왼쪽 끝, 0.5=가운데, 1=오른쪽 끝). */
     @Volatile private var alignX: (Int) -> Float = { 0.5f }
 
-    private var gray: Bitmap = makeGray(1, 1)
+    @Volatile private var gray: Bitmap = makeGray(1, 1)
     private val decoded = HashMap<Int, Bitmap>()   // guarded by `decoded`
     private val inflight = HashSet<Int>()          // guarded by `decoded`
+
+    /**
+     * 페이지 크기·정렬이 바뀔 때마다 올린다. 그 전에 시작한 디코드는 옛 크기/정렬로 만든 것이라
+     * 끝났을 때 세대가 다르면 버린다 (guarded by `decoded`).
+     */
+    private var generation = 0
+    private var closed = false                     // guarded by `decoded`
 
     var onReady: ((index: Int) -> Unit)? = null
 
@@ -73,8 +88,7 @@ class PageSource(
             pageH = h
             gray.recycle()
             gray = makeGray(w, h)
-            decoded.values.forEach { it.recycle() }
-            decoded.clear()
+            invalidateLocked()
         }
         ensureWindow()
     }
@@ -83,10 +97,17 @@ class PageSource(
     fun setAlign(f: (Int) -> Float) {
         synchronized(decoded) {
             alignX = f
-            decoded.values.forEach { it.recycle() }
-            decoded.clear()
+            invalidateLocked()
         }
         ensureWindow()
+    }
+
+    /** 디코드된 것을 모두 버리고, 진행 중인 디코드도 결과를 쓰지 않게 한다. `decoded` 락을 잡고 부를 것. */
+    private fun invalidateLocked() {
+        generation++
+        inflight.clear()
+        decoded.values.forEach { it.recycle() }
+        decoded.clear()
     }
 
     fun placeholder(): Bitmap = gray
@@ -116,31 +137,29 @@ class PageSource(
     /** 현재 페이지를 최우선으로 받고, 끝난 뒤에야 앞뒤 프리페치를 시작한다. */
     private fun ensureWindow() {
         val cur = current
-        val loadCurNow = synchronized(decoded) {
-            if (cur in pages.indices && pages[cur].entryId.isNotEmpty() &&
+        val gen = synchronized(decoded) {
+            if (!closed && cur in pages.indices && pages[cur].entryId.isNotEmpty() &&
                 !decoded.containsKey(cur) && cur !in inflight
             ) {
-                inflight.add(cur); true
-            } else false
+                inflight.add(cur); generation
+            } else -1
         }
-        if (!loadCurNow) {
+        if (gen < 0) {
             prefetchAround(cur)
             return
         }
         scope.launch(Dispatchers.IO) {
-            val bmp = runCatching { load(cur) }.getOrNull()
-            synchronized(decoded) {
-                inflight.remove(cur)
-                if (bmp != null) decoded[cur] = bmp
-            }
-            if (bmp != null) withContext(Dispatchers.Main) { onReady?.invoke(cur) }
+            loadInto(cur, gen)
             prefetchAround(current)
         }
     }
 
     private fun prefetchAround(center: Int) {
         val toLoad = ArrayList<Int>()
+        val gen: Int
         synchronized(decoded) {
+            if (closed) return
+            gen = generation
             for (i in (center - BACK)..(center + fwd)) {
                 if (i !in pages.indices || i == center) continue
                 if (pages[i].entryId.isEmpty()) continue
@@ -148,10 +167,13 @@ class PageSource(
                 inflight.add(i)
                 toLoad.add(i)
             }
+            // 화면 크기 비트맵은 장당 수~십수 MB 라, 프리페치 창을 조금만 벗어나도 바로 버린다.
+            val lo = current - BACK - KEEP_MARGIN
+            val hi = current + fwd + KEEP_MARGIN
             val it = decoded.entries.iterator()
             while (it.hasNext()) {
                 val e = it.next()
-                if (e.key < current - keep || e.key > current + keep) {
+                if (e.key < lo || e.key > hi) {
                     e.value.recycle()
                     it.remove()
                 }
@@ -159,43 +181,81 @@ class PageSource(
         }
         toLoad.sortBy { abs(it - center) }
         for (i in toLoad) {
-            scope.launch(Dispatchers.IO) {
-                val bmp = runCatching { load(i) }.getOrNull()
-                synchronized(decoded) {
-                    inflight.remove(i)
-                    if (bmp != null) decoded[i] = bmp
+            scope.launch(Dispatchers.IO) { loadInto(i, gen) }
+        }
+    }
+
+    /**
+     * [index] 를 불러와 `decoded` 에 넣는다. 실패하면 몇 번 다시 시도한다.
+     * 도중에 크기/정렬이 바뀌었거나([gen] 불일치) 닫혔으면 결과를 버린다 — 새 세대가 다시 요청한다.
+     */
+    private suspend fun loadInto(index: Int, gen: Int) {
+        var attempt = 0
+        while (true) {
+            val bmp = try {
+                load(index)
+            } catch (e: CancellationException) {
+                synchronized(decoded) { if (gen == generation) inflight.remove(index) }
+                throw e
+            } catch (e: Exception) {
+                null
+            }
+            val stale = synchronized(decoded) { closed || gen != generation }
+            if (stale) {
+                bmp?.recycle()
+                return
+            }
+            if (bmp != null) {
+                val stored = synchronized(decoded) {
+                    if (closed || gen != generation) false
+                    else { inflight.remove(index); decoded[index] = bmp; true }
                 }
-                if (bmp != null) withContext(Dispatchers.Main) { onReady?.invoke(i) }
+                if (stored) withContext(Dispatchers.Main) { onReady?.invoke(index) } else bmp.recycle()
+                return
             }
+            if (attempt++ >= RETRIES) {
+                synchronized(decoded) { if (gen == generation) inflight.remove(index) }
+                return
+            }
+            delay(RETRY_DELAY_MS)
         }
     }
 
-    private suspend fun load(index: Int): Bitmap {
+    /** 디코드된 비트맵, 또는 파일이 깨져 디코드할 수 없으면 null. 네트워크 오류는 예외. */
+    private suspend fun load(index: Int): Bitmap? {
         val p = pages[index]
-        val src: File = backend.localPath(p.entryId)?.let(::File) ?: run {
-            val f = File(cacheDir, "img_%08x_%s".format(p.entryId.hashCode(), sanitize(p.name)))
-            if (!f.exists() || f.length() == 0L) {
-                backend.open(p.entryId).use { input -> f.outputStream().use { input.copyTo(it) } }
+        val local = backend.localPath(p.entryId)
+        if (local != null) return decode(File(local), p.half, index)
+
+        val f = File(cacheDir, "img_%08x_%s".format(p.entryId.hashCode(), sanitize(p.name)))
+        if (!f.exists() || f.length() == 0L) {
+            // 임시 파일에 받고 다 받은 뒤에 이름을 바꾼다. 도중에 끊기면 반쪽 파일이
+            // 캐시에 남아 계속 깨진 그림으로 디코드되는 일이 없도록.
+            val tmp = File(cacheDir, f.name + ".${Thread.currentThread().id}.tmp")
+            try {
+                backend.open(p.entryId).use { input -> tmp.outputStream().use { input.copyTo(it) } }
+                if (!tmp.renameTo(f)) throw java.io.IOException("cache rename failed")
+            } finally {
+                tmp.delete()
             }
-            f
         }
-        return decode(src, p.half, index)
+        return decode(f, p.half, index) ?: run { f.delete(); null }   // 깨진 캐시는 다음에 다시 받는다
     }
 
-    private fun decode(file: File, half: Half, index: Int): Bitmap {
+    private fun decode(file: File, half: Half, index: Int): Bitmap? {
         val pw = pageW
         val ph = pageH
         val path = file.absolutePath
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeFile(path, bounds)
-        if (bounds.outWidth <= 0) return makeGray(pw, ph)
+        if (bounds.outWidth <= 0) return null
 
         val targetW = if (half == Half.WHOLE) pw else pw * 2
         val opts = BitmapFactory.Options().apply {
             inPreferredConfig = Bitmap.Config.ARGB_8888
             inSampleSize = sample(bounds.outWidth, bounds.outHeight, targetW, ph)
         }
-        var bmp = BitmapFactory.decodeFile(path, opts) ?: return makeGray(pw, ph)
+        var bmp = BitmapFactory.decodeFile(path, opts) ?: return null
 
         if (half != Half.WHOLE) {
             val hw = bmp.width / 2
@@ -313,8 +373,9 @@ class PageSource(
 
     fun close() {
         synchronized(decoded) {
-            decoded.values.forEach { it.recycle() }
-            decoded.clear()
+            if (closed) return
+            closed = true
+            invalidateLocked()
             gray.recycle()
         }
     }

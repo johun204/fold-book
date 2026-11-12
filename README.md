@@ -9,6 +9,7 @@ set JAVA_HOME=C:\Program Files\Eclipse Adoptium\jdk-17.0.20.101-hotspot
 gradlew :app:assembleDebug          # 또는 installDebug (연결된 기기)
 gradlew :app:testDebugUnitTest
 ```
+macOS: `brew install openjdk@17` 후 `JAVA_HOME=/opt/homebrew/opt/openjdk@17 ./gradlew …`
 AGP 8.7.3 / Kotlin 2.1.0 / Gradle 8.14.3 / compileSdk 35 / minSdk 26.
 (저메모리 환경에서는 `gradle.properties` 의 힙을 낮추고 `org.gradle.daemon=false` 로 빌드)
 
@@ -41,7 +42,9 @@ AGP 8.7.3 / Kotlin 2.1.0 / Gradle 8.14.3 / compileSdk 35 / minSdk 26.
     **Wi-Fi 전용**(`Prefs.wifiOnlyDownload`, 기본 켜짐)이면 모바일 데이터일 때 시작 전에 확인하고,
     받는 중 Wi-Fi 가 끊기면 파일 경계에서 **일시중지**(`DownloadState.paused`) 후 다시 붙으면 이어받는다.
     카드·알림에서 "모바일 데이터로 계속"(`ACTION_ALLOW_METERED`) 또는 중단을 고를 수 있다.
-    전송 중 끊긴 파일은 그 파일만 최대 3번까지 처음부터 다시 받는다.
+    전송 중 끊긴 파일은 그 파일만 최대 3번까지 처음부터 다시 받는다(SMB 의 런타임 예외 포함).
+    끝내 못 받았거나 취소한 파일은 잘린 채로 남기지 않고 지운다. 다운로드는 한 번에 하나만 —
+    받는 중에는 다운로드 메뉴가 비활성화된다.
 - **설정** — 각 옵션마다 상세 설명. 읽기 방향 **기본값**(책마다 뷰어 설정에서 따로 변경 가능) /
   페이지 표시(자동·한 장·양면) / 양면 스캔본 분할 토글 / 원격 분할 분석 토글 / 미리 불러올 장 수(1~12) /
   **터치 넘김 가장자리 영역**(펼침·접힘 각각 0~50%) / 원격 썸네일 토글 / **Wi-Fi 에서만 다운로드** 토글 /
@@ -100,7 +103,10 @@ AGP 8.7.3 / Kotlin 2.1.0 / Gradle 8.14.3 / compileSdk 35 / minSdk 26.
 - **이어보기 즉시 열기**(`reader/SessionManifest`): 세션 캐시에 이미지 목록·스캔본 크기를 `manifest.json` 으로
   저장해, 앱을 껐다 켠 뒤에도 **네트워크 조회 없이** 바로 리더로 진입하고 백그라운드에서 목록을 대조한다.
 - 받은 파일은 세션 캐시(`cacheDir/sessions/<id>/`, 파일명 = entryId 해시), 세션 종료/삭제 시 삭제 + 시작 시
-  찌꺼기 정리 + 400MB 상한.
+  (백그라운드로) 찌꺼기 정리 + 400MB 상한. 상한을 넘으면 오래 안 본 세션부터 이미지만 지우고
+  (`manifest.json` 은 유지) 가장 최근 세션은 건드리지 않는다. 원격 이미지는 임시 파일에 받은 뒤 이름을
+  바꾸므로 받다 끊긴 반쪽 파일이 캐시에 남지 않는다.
+- 디코드해 둔 비트맵은 프리페치 창(뒤 2장 ~ 앞 N장)에서 2장 넘게 벗어나면 바로 버린다.
 - **좌우 양면 스캔본**은 헤더(앞 64KB, `ImageHeader`)로 크기를 파싱해 좌/우로 분할(로컬·원격 모두). 설정에서 끄면 통짜.
   양면 모드에서는 **스프레드 두 반쪽이 반드시 한 페어**에 들어간다: 앞이 홀수면 빈 페이지를 끼우고,
   RTL 은 라이브러리 순번이 역순이라 전체 장수가 홀수면 페어가 한 칸 밀리므로 끝에 빈 페이지를 하나 더한다
@@ -112,26 +118,35 @@ AGP 8.7.3 / Kotlin 2.1.0 / Gradle 8.14.3 / compileSdk 35 / minSdk 26.
 - **폴드/펼침·회전**은 `configChanges` 로 Activity 재생성 없이, `PageFlipView.onConfigChanged` 가 표면만 다시
   잡아 단면↔양면까지 전환. `onDrawFrame` 은 재구성 중 예외를 삼킨다.
 - 구글 드라이브는 앱 시작 시 백그라운드로 토큰 + 최근 세션 폴더 목록을 미리 데워 첫 로딩을 줄인다.
-- 갤럭시 폴드: 살짝 접었다 펴면 다음 페이지 (`androidx.window`, 설정 토글).
+- **이어보기 위치는 이미지로 기억한다**(`Session.lastEntryId` / `lastHalf`). 양면 모드는 빈 페이지를 끼워
+  페이지 번호가 단면과 달라지므로, 번호 대신 마지막으로 본 이미지(스프레드면 어느 반쪽인지)를 저장하고
+  `pageNumberOf` 로 찾는다. 뷰어 설정을 바꿔 다시 만들 때도 같다(단위테스트 있음).
+- **크기·정렬이 바뀌면 진행 중이던 디코드는 버린다**(`PageSource.generation`). 접기/펼치기 직전에 시작한
+  디코드가 예전 화면 크기로 끝나 그대로 남는 일이 없다. 불러오기에 실패한 페이지는 1.5초 간격으로 2번 더 시도한다.
+- **넘긴 뒤 같은 텍스처를 다시 올리지 않는다**: 넘기는 동안 미리 올린 텍스처가 실제 이미지였는지 기억해
+  (`PageRender` 의 `targetReal` / `Real`), 넘김이 끝나 그 텍스처가 화면에 남을 때 재업로드를 건너뛴다.
+  양면 모드는 `Page.swapTexturesWithPage` 가 마스크 색도 함께 옮기도록 벤더링 코드를 고쳤다.
 
 ## 구글 드라이브 준비 (1회)
 [`docs/google-drive-setup.md`](docs/google-drive-setup.md) 참고. 패키지 `com.foldbook`,
 릴리즈 서명 SHA-1 `3A:21:F0:1D:0F:80:01:04:1C:31:82:2E:87:25:55:65:43:C2:17:73`.
 
 ## 검증 상태
-- `assembleDebug` / `assembleRelease` / 단위 테스트(SessionManifest · 자연 정렬 · SpreadPolicy · ImageHeader) **통과**.
+- `assembleDebug` / `assembleRelease` / 단위 테스트(SessionManifest · 자연 정렬 · SpreadPolicy · ImageHeader · SessionCache) **통과**.
 - 이 PC는 RAM 부족으로 에뮬레이터 구동 불가 → **실기기에서 `installDebug` 로 실제 동작 확인 필요.**
   특히 RTL 넘김(효과 반전 없이 순번만 역순)·양면·폴드 전환·홈 복귀는 기기 확인 필요.
 - 앱 아이콘은 런처가 캐시하므로 **기존 앱 삭제 후 재설치**해야 새 아이콘이 보인다.
-- 다운로드 기능은 화면을 벗어나면(다른 탭 이동 등) 중단됨 — 완료까지 화면 유지 권장.
+- v0.7.0 의 변경(캐시 상한·이어보기 위치·텍스처 재사용·SMB 연결 재사용·비밀번호 암호화 등)은 빌드와
+  단위 테스트까지만 확인했다. 넘김 화면과 SMB/드라이브는 실기기 확인 필요.
 
 ## 핵심 파일
 | 파일 | 역할 |
 |---|---|
 | `ui/FoldBookApp.kt` | Scaffold + 하단 네비 + NavHost |
 | `ui/HomeScreen / BrowseScreen / BrowseFolderScreen / SettingsScreen / AddConnection` | 화면들 |
-| `Models.kt` / `Stores.kt` | Session · Connection 모델과 JSON 스토어(StateFlow) |
-| `StorageBackend.kt` / `SmbBackend.kt` / `DriveBackend.kt` | 로컬/SMB/Drive 공통 접근 |
+| `Models.kt` / `Stores.kt` | Session · Connection 모델과 JSON 스토어(StateFlow, 임시 파일 → 이름 바꾸기로 저장) |
+| `PassCrypt.kt` | 공유폴더 비밀번호 암호화(Android Keystore). `connections.json` 은 백업에서도 제외 |
+| `StorageBackend.kt` / `SmbBackend.kt` / `DriveBackend.kt` | 로컬/SMB/Drive 공통 접근. SMB 는 연결을 열어 두고 재사용(60초 유휴 시 닫음), Drive 는 목록 페이지 이어받기 · 401 시 토큰 갱신 · 썸네일은 `thumbnailLink` |
 | `PageFlipView.kt` / `PageRender.kt` | eschao PageFlip 연동 (회색→실제 텍스처 1회 교체) |
 | `PageImageProvider.kt` | 라이브러리 페이지번호→비트맵. RTL 은 여기서 순번을 역순 매핑 |
 | `reader/PageSource.kt` | 창 방식 비동기 로더 + 세션 캐시 |

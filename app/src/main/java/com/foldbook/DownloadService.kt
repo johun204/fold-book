@@ -57,6 +57,7 @@ class DownloadService : Service() {
     private var pending: CompletableDeferred<Boolean>? = null
     private var overwriteAll: Boolean? = null   // null=미결정, true=모두 덮어쓰기, false=모두 건너뛰기
     @Volatile private var allowMetered = false  // 모바일 데이터로도 받기 (사용자가 허용)
+    @Volatile private var timedOut = false
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -74,19 +75,24 @@ class DownloadService : Service() {
             ACTION_CANCEL -> {
                 pending?.cancel()
                 job?.cancel()
+                stopIfIdle()
                 return START_NOT_STICKY
             }
             ACTION_ALLOW_METERED -> {
                 allowMetered = true
+                stopIfIdle()
                 return START_NOT_STICKY
             }
             ACTION_RESOLVE -> {
                 val ow = intent.getBooleanExtra(EX_OVERWRITE, false)
                 if (intent.getBooleanExtra(EX_ALL, false)) overwriteAll = ow
                 pending?.complete(ow)
+                stopIfIdle()
                 return START_NOT_STICKY
             }
         }
+        // 한 번에 하나만. 진행 중에 또 시작하면 두 작업이 같은 상태를 덮어쓰고, 먼저 끝난 쪽이 서비스를 내린다.
+        if (job?.isActive == true) return START_NOT_STICKY
 
         val connId = intent?.getStringExtra(EX_CONN)
         val tree = intent?.getStringExtra(EX_TREE)?.let(Uri::parse)
@@ -97,6 +103,8 @@ class DownloadService : Service() {
         val dirs = intent.getBooleanArrayExtra(EX_DIRS) ?: BooleanArray(ids.size)
         val label = intent.getStringExtra(EX_LABEL) ?: "다운로드"
         allowMetered = intent.getBooleanExtra(EX_METERED, false)
+        overwriteAll = null
+        timedOut = false
         val rootNames = names.toList()
 
         state.value = DownloadState(label, 0, 0, roots = rootNames)
@@ -116,8 +124,9 @@ class DownloadService : Service() {
                 state.value = state.value!!.copy(total = total)
                 pushNotif(notif(label, 0, total, indeterminate = false, conflict = null))
                 var done = 0
+                val existing = childrenByName(dest)
                 for (e in roots) copyInto(
-                    applicationContext, dest, backend, e,
+                    applicationContext, dest, existing, backend, e,
                     ask = { name -> askConflict(name) },
                     awaitNetwork = { awaitNetwork() },
                     onLeaf = { name ->
@@ -134,7 +143,7 @@ class DownloadService : Service() {
                 finalNotif("다운로드 완료", "$label · ${n}개")
             }.onFailure { t ->
                 if (t is kotlinx.coroutines.CancellationException) {
-                    finish((state.value ?: DownloadState(label, 0, 0)).copy(finished = true, error = "취소됨"))
+                    finish((state.value ?: DownloadState(label, 0, 0)).copy(finished = true, error = if (timedOut) "시간 제한으로 중단됨" else "취소됨"))
                 } else {
                     finish((state.value ?: DownloadState(label, 0, 0)).copy(finished = true, error = t.message ?: "실패"))
                     finalNotif("다운로드 실패", t.message ?: "")
@@ -161,6 +170,19 @@ class DownloadService : Service() {
     }
 
     private fun isUnmetered(): Boolean = isUnmetered(this)
+
+    /** 받는 작업 없이 취소·선택 인텐트만 온 경우(프로세스가 죽었다 살아난 뒤 등) 서비스를 남겨두지 않는다. */
+    private fun stopIfIdle() {
+        if (job?.isActive != true) stopSelf()
+    }
+
+    /** Android 15+: dataSync 포그라운드 서비스는 하루 6시간까지. 넘기면 여기서 스스로 멈춰야 한다. */
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        timedOut = true
+        pending?.cancel()
+        job?.cancel()
+        stopIfIdle()
+    }
 
     private fun pushState() {
         state.value?.let {
@@ -299,11 +321,15 @@ class DownloadService : Service() {
             return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
         }
 
-        /** allowMetered=true 면 모바일 데이터에서도 멈추지 않는다. */
+        /** 받는 중인가 (끝났거나 닫지 않은 결과만 남은 상태는 아님). */
+        val isActive get() = state.value?.finished == false
+
+        /** allowMetered=true 면 모바일 데이터에서도 멈추지 않는다. 이미 받는 중이면 무시. */
         fun start(
             ctx: Context, connId: String, tree: Uri, roots: List<Entry>, label: String,
             allowMetered: Boolean,
         ) {
+            if (isActive) return
             state.value = DownloadState(label, 0, 0, roots = roots.map { it.name })
             val i = Intent(ctx, DownloadService::class.java).apply {
                 putExtra(EX_CONN, connId)
@@ -344,9 +370,18 @@ private suspend fun countFiles(backend: StorageBackend, entries: List<Entry>): I
     return n
 }
 
+/** 폴더 안 항목을 한 번만 나열해 이름으로 찾는다 (DocumentFile.findFile 은 부를 때마다 전체를 나열). */
+private fun childrenByName(dir: DocumentFile): Map<String, DocumentFile> =
+    dir.listFiles().mapNotNull { f -> f.name?.let { it to f } }.toMap()
+
+/** 연결이 끊겨 생긴 오류인가 (다시 받아볼 만한가). smbj 는 대부분 런타임 예외로 던진다. */
+private fun isTransient(e: Exception) =
+    e is java.io.IOException || e is com.hierynomus.smbj.common.SMBRuntimeException
+
 private suspend fun copyInto(
     ctx: Context,
     dest: DocumentFile,
+    existingInDest: Map<String, DocumentFile>,
     backend: StorageBackend,
     entry: Entry,
     ask: suspend (name: String) -> Boolean,
@@ -356,27 +391,34 @@ private suspend fun copyInto(
     currentCoroutineContext().ensureActive()
     awaitNetwork()
     if (entry.isDir) {
-        val sub = dest.findFile(entry.name)?.takeIf { it.isDirectory }
-            ?: dest.createDirectory(entry.name)
-            ?: return
-        for (child in backend.list(entry.id)) copyInto(ctx, sub, backend, child, ask, awaitNetwork, onLeaf)
+        val found = existingInDest[entry.name]?.takeIf { it.isDirectory }
+        val sub = found ?: dest.createDirectory(entry.name) ?: return
+        val existing = if (found != null) childrenByName(sub) else emptyMap()
+        for (child in backend.list(entry.id)) {
+            copyInto(ctx, sub, existing, backend, child, ask, awaitNetwork, onLeaf)
+        }
     } else {
-        val existing = dest.findFile(entry.name)?.takeIf { it.isFile }
+        val existing = existingInDest[entry.name]?.takeIf { it.isFile }
         if (existing != null && !ask(entry.name)) {
             onLeaf(entry.name)   // 건너뛰기 — 진행 카운트에는 포함
             return
         }
         val file = existing ?: dest.createFile(mimeOf(entry.name), entry.name) ?: return
         // 받는 중에 연결이 끊기면 그 파일만 처음부터 다시 받는다("wt" 라 기존 내용은 잘린다).
+        // 끝내 못 받았거나 취소되면 잘린 파일을 남기지 않는다.
         var attempt = 0
         while (true) {
             try {
                 ctx.contentResolver.openOutputStream(file.uri, "wt")?.use { out ->
                     backend.open(entry.id).use { it.copyTo(out) }
                 }
+                currentCoroutineContext().ensureActive()
                 break
-            } catch (e: java.io.IOException) {
-                if (++attempt > 3) throw e
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException || !isTransient(e) || ++attempt > 3) {
+                    runCatching { file.delete() }
+                    throw e
+                }
                 awaitNetwork()
             }
         }

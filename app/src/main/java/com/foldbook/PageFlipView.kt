@@ -54,6 +54,9 @@ class PageFlipView(
     val pageCount get() = provider.count
     fun currentPageNumber(): Int = toReading(render.pageNo)
 
+    /** 이 뷰가 Compose 에서 떨어져 나갈 때 — 더는 그릴 일이 없으니 디코드해 둔 비트맵을 놓는다. */
+    fun closeSource() = provider.source.close()
+
     private val lock = ReentrantLock()
     private val pageFlip = PageFlip(context)
     private val handler: Handler
@@ -65,7 +68,7 @@ class PageFlipView(
     private var downT = 0L
     private var dragging = false
     private var deferredDown = false   // 넘김 진행 중에 눌러서 잡기를 미뤄둔 상태
-    private var synthAnim: ValueAnimator? = null   // 탭·접힘 제스처의 합성 드래그
+    private var synthAnim: ValueAnimator? = null   // 가장자리 탭의 합성 드래그
 
     /** 읽기 순번 ↔ 라이브러리 순번 (rtl 이면 역순). 둘 다 1-based. */
     private fun toLib(readingPage: Int): Int =
@@ -182,7 +185,7 @@ class PageFlipView(
         }
     }
 
-    /** 손대지 않고 읽기상 다음/이전 페이지로 (폴더블 접힘 제스처·가장자리 탭). */
+    /** 손대지 않고 읽기상 다음/이전 페이지로 (가장자리 탭). */
     fun flipForward() = synthFlip(fromRightEdge = !rtl)
     fun flipBackward() = synthFlip(fromRightEdge = rtl)
 
@@ -335,7 +338,7 @@ class PageFlipView(
     }
 
     private companion object {
-        /** 탭·접힘 제스처로 넘길 때 모서리를 채어 올리는 시간(ms). 뒤따르는 감속 구간은 약 2배. */
+        /** 가장자리 탭으로 넘길 때 모서리를 채어 올리는 시간(ms). 뒤따르는 감속 구간은 약 2배. */
         const val SYNTH_DRAG_MS = 200L
     }
 

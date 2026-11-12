@@ -16,6 +16,9 @@ interface StorageBackend {
     /** 이미지 원본 바이트. 호출측이 close 한다. */
     suspend fun open(entryId: String): InputStream
 
+    /** 탐색 화면 썸네일용 바이트. 기본은 원본 그대로, 작은 미리보기를 주는 백엔드는 그것을 쓴다. */
+    suspend fun openThumbnail(entryId: String): InputStream = open(entryId)
+
     /** 로컬 파일이면 경로, 원격이면 null. */
     fun localPath(entryId: String): String?
 

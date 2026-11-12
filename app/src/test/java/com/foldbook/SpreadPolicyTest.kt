@@ -1,6 +1,7 @@
 package com.foldbook
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SpreadPolicyTest {
@@ -30,7 +31,7 @@ class SpreadPolicyTest {
     }
 
     @Test fun `double mode splits spread following reading direction`() {
-        // RTL: 오른쪽 먼저. 뷰가 좌우 반전(scaleX=-1)되므로 이 순서 그대로가 화면에 맞다.
+        // RTL: 오른쪽 먼저 (읽기 순번).
         val pages = SpreadPolicy.expand(listOf(b), ReadingDirection.RTL, doubleMode = true, split = true, dims = dims)
         assertEquals(listOf(Half.RIGHT, Half.LEFT), pages.map { it.half })
         assertEquals(listOf("b", "b"), pages.map { it.entryId })
@@ -104,5 +105,39 @@ class SpreadPolicyTest {
         assertEquals(true, SpreadPolicy.doublePage(SpreadMode.AUTO, wideScreen = true))
         assertEquals(false, SpreadPolicy.doublePage(SpreadMode.SINGLE, wideScreen = true))
         assertEquals(true, SpreadPolicy.doublePage(SpreadMode.DOUBLE, wideScreen = false))
+    }
+
+    @Test fun `near-square image is not treated as a spread`() {
+        val sq = Entry("s", "s.jpg", false)
+        val pages = SpreadPolicy.expand(listOf(sq), ReadingDirection.LTR, doubleMode = false, split = true) { 1000 to 1000 }
+        assertEquals(listOf(Half.WHOLE), pages.map { it.half })
+    }
+
+    @Test fun `resume position survives switching between single and double view`() {
+        // 낱장 3 + 스프레드 + 낱장: 양면 모드에서는 스프레드 앞에 빈 페이지가 끼어 번호가 밀린다.
+        val c = Entry("c", "c.jpg", false)
+        val d = Entry("d", "d.jpg", false)
+        val e = Entry("e", "e.jpg", false)
+        val imgs = listOf(a, c, d, b, e)
+        val single = SpreadPolicy.expand(imgs, ReadingDirection.RTL, doubleMode = false, split = true, dims = dims)
+        val double = SpreadPolicy.expand(imgs, ReadingDirection.RTL, doubleMode = true, split = true, dims = dims)
+
+        val n = pageNumberOf(single, "e", Half.WHOLE)!!
+        val ref = pageRefAt(single, n)!!
+        val m = pageNumberOf(double, ref.entryId, ref.half)!!
+        assertEquals("e", double[m - 1].entryId)
+        assertTrue(n != m)                               // 번호로 복원했다면 다른 그림이 나왔을 자리
+
+        // 스프레드의 반쪽도 같은 반쪽으로 돌아온다
+        val left = pageNumberOf(double, "b", Half.LEFT)!!
+        assertEquals(Half.LEFT, single[pageNumberOf(single, "b", pageRefAt(double, left)!!.half)!! - 1].half)
+    }
+
+    @Test fun `blank page resolves to its neighbour image and unknown image to null`() {
+        val pages = SpreadPolicy.expand(images, ReadingDirection.RTL, doubleMode = true, split = true, dims = dims)
+        assertEquals("", pages[1].entryId)
+        assertEquals("a", pageRefAt(pages, 2)!!.entryId)   // 빈 페이지 -> 같은 펼침면의 그림
+        assertEquals(null, pageNumberOf(pages, "zzz", null))
+        assertEquals(null, pageNumberOf(pages, null, null))
     }
 }

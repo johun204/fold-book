@@ -22,6 +22,8 @@ data class SessionManifest(
     /** entryId -> [width, height]. 없으면 크기 미상(통짜로 취급). */
     val dims: Map<String, List<Int>> = emptyMap(),
     val savedAt: Long = 0L,
+    /** 저장할 때 스캔본 크기 분석을 했는지. 설정이 달라지면 [dims] 를 믿을 수 없어 다시 조회한다. */
+    val analyzed: Boolean = true,
 ) {
     fun asEntries(): List<Entry> = entries.map { Entry(it.id, it.name, isDir = false) }
     fun dimOf(entryId: String): Pair<Int, Int>? = dims[entryId]?.takeIf { it.size == 2 }?.let { it[0] to it[1] }
@@ -50,6 +52,7 @@ object SessionManifestStore {
         direction: ReadingDirection,
         images: List<Entry>,
         dims: Map<String, Pair<Int, Int>?>,
+        analyzed: Boolean = true,
     ) {
         runCatching {
             val m = SessionManifest(
@@ -59,6 +62,7 @@ object SessionManifestStore {
                 entries = images.map { ManifestEntry(it.id, it.name) },
                 dims = dims.mapNotNull { (k, v) -> v?.let { k to listOf(it.first, it.second) } }.toMap(),
                 savedAt = System.currentTimeMillis(),
+                analyzed = analyzed,
             )
             sessionDir.mkdirs()
             file(sessionDir).writeText(json.encodeToString(m))

@@ -109,6 +109,7 @@ fun ReaderScreen(
                 AndroidView(
                     factory = { flipViewProvider()!! },
                     modifier = Modifier.fillMaxSize(),
+                    onRelease = { (it as? PageFlipView)?.closeSource() },
                 )
             }
         }
